@@ -1,4 +1,5 @@
 .DS_Store
+*.pyc
 __pycache__/
 .runtime/
 local_node_store/northern_new_england/
