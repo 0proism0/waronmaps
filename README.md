@@ -49,20 +49,20 @@ Open:
 http://localhost:8002/openfreemap_viewer.html
 ```
 
-## Gitignore
+## .gitignore
 
-Yes, this project needs a `.gitignore`.
+Current root `.gitignore` entries:
 
-The repository should ignore:
-
-- runtime logs and PID files
-- Rust build output
-- local generated map/tile caches
-- large source PBF files
-- private/local game state such as player sessions and passwords
-- Python bytecode caches
-
-That is why the root `.gitignore` excludes `.runtime/`, `rust_server/target/`, generated local node cache data, `state_pbf/`, `game_data/state.json`, and `__pycache__/`.
+```gitignore
+.DS_Store
+*.pyc
+__pycache__/
+.runtime/
+local_node_store/northern_new_england/
+rust_server/target/
+state_pbf/
+game_data/state.json
+```
 
 ## License
 

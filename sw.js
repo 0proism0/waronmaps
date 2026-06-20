@@ -1,5 +1,5 @@
-const APP_SHELL_CACHE = "new-england-four-app-v32";
-const DATA_CACHE = "new-england-four-data-v32";
+const APP_SHELL_CACHE = "new-england-four-app-v44";
+const DATA_CACHE = "new-england-four-data-v44";
 const APP_SHELL_FILES = [
   "/",
   "/openfreemap_viewer.html",
@@ -105,12 +105,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (url.pathname.endsWith("openfreemap_viewer.html")) {
+    event.respondWith(fetch(request, { cache: "no-store" }));
+    return;
+  }
+
   if (
     url.pathname.endsWith("/metadata.json") ||
     url.pathname.endsWith("/tile_index.json") ||
     url.pathname.endsWith("/build_status.json") ||
-    url.pathname.endsWith("/region_manifest.json") ||
-    url.pathname.endsWith("openfreemap_viewer.html")
+    url.pathname.endsWith("/region_manifest.json")
   ) {
     event.respondWith(networkFirst(request, APP_SHELL_CACHE));
   }

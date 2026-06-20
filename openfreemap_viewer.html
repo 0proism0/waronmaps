@@ -24,6 +24,10 @@
     .node-info strong { display: block; margin-bottom: 8px; font-size: 15px; }
     .node-info .status { margin-top: 6px; }
     .route-controls { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.18); }
+    .connect-mode-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .connect-mode-actions.hidden { display: none; }
+    .icon-button { width: 36px; height: 36px; padding: 0; border-radius: 999px; font-size: 24px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+    .shortcut-button { padding: 8px 12px; border-radius: 999px; font-size: 12px; letter-spacing: 0.04em; }
     .route-controls label { display: block; color: #cbd5e1; font-size: 12px; margin-bottom: 4px; }
     .route-controls .actions { margin-top: 6px; }
     .route-list { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.18); }
@@ -80,7 +84,7 @@
   <button id="showTopBarButton" class="show-top-bar-button" type="button">Show Progress</button>
   <div class="overlay panel" id="panel">
     <h1 id="panelTitle">Maine and New Hampshire Game</h1>
-    <p>White nodes are neutral and start at 10 army. Click one of your green nodes to open its node info panel, then use the adjacent target list there to attack or transfer along a single road.</p>
+    <p>White nodes start at 10 army. Click your node, then click an adjacent node.</p>
     <div class="section">
       <div id="authSummary" class="status">Register or log in to claim 10 starting nodes.</div>
       <input id="usernameInput" placeholder="username">
@@ -117,13 +121,17 @@
       <div class="stat"><span>Node</span><strong id="nodeInfoId">None</strong></div>
       <div class="stat"><span>Owner</span><strong id="nodeInfoOwner">No node selected</strong></div>
       <div class="stat"><span>Army</span><strong id="nodeInfoArmy">0</strong></div>
-      <div class="stat"><span>Net per tick</span><strong id="nodeInfoDelta">0</strong></div>
+      <div class="stat"><span>Net per 3s tick</span><strong id="nodeInfoDelta">0</strong></div>
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
     <div class="route-controls">
-      <label for="sendPerTickInput">New connection army per tick</label>
+      <div id="connectModeActions" class="connect-mode-actions hidden">
+        <button id="armConnectButton" type="button" class="icon-button" title="Connect">+</button>
+        <button id="spaceConnectButton" type="button" class="secondary shortcut-button" title="Space">Space</button>
+      </div>
+      <label for="sendPerTickInput">New connection army per 3s tick</label>
       <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
-      <div id="routeInfoHint" class="hint">How to connect: click your node, then use the adjacent target buttons below in this panel.</div>
+      <div id="routeInfoHint" class="hint">Click your node, then click an adjacent node.</div>
       <div class="actions">
         <button id="updateRouteRateButton" type="button" class="secondary">Update Route Rate</button>
       </div>
@@ -137,7 +145,7 @@
       <div class="route-list-title">Army Lines On This Node</div>
       <div id="nodeRoutesList"></div>
     </div>
-    <div id="nodeInfoStatus" class="status">Click any visible node to inspect it here.</div>
+      <div id="nodeInfoStatus" class="status">Click any visible node to inspect it here.</div>
   </div>
   <script src="/vendor/maplibre-gl.js"></script>
   <script>
@@ -163,6 +171,10 @@
     const GAME_POLL_MS = 3000;
     const NETWORK_RETRY_MS = 10 * 60 * 1000;
     const FETCH_TIMEOUT_MS = 30000;
+    const WORLD_TICK_SECONDS = 3;
+    const DASH_LEN = 8;
+    const GAP_LEN = 10;
+    const DASH_CYCLE_LEN = DASH_LEN + GAP_LEN;
     const NODE_MIN_ZOOM = 11.5;
     const NODE_DATA_ZOOM_OFFSET = 2;
     const NODE_DATA_MIN_ZOOM = 12;
@@ -209,6 +221,9 @@
     const sendPerTickInput = document.getElementById("sendPerTickInput");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
+    const connectModeActionsEl = document.getElementById("connectModeActions");
+    const armConnectButton = document.getElementById("armConnectButton");
+    const spaceConnectButton = document.getElementById("spaceConnectButton");
     const connectionCanvasEl = document.getElementById("connectionCanvas");
     const connectionTargetsSectionEl = document.getElementById("connectionTargetsSection");
     const connectionTargetsHintEl = document.getElementById("connectionTargetsHint");
@@ -251,6 +266,8 @@
     let selectedNodeTargets = [];
     let selectedNodeTargetsRequestVersion = 0;
     let attackArrowAnimationFrame = 0;
+    let hoveredAttackKey = null;
+    let hoveredPreviewTargetNodeId = null;
     const connectionCanvasContext = connectionCanvasEl.getContext("2d");
 
     const map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/liberty", center: [-70.5, 43.8], zoom: 11.8 });
@@ -267,6 +284,23 @@
     function setSendPerTickValue(value) {
       sendPerTickInput.value = String(normalizeSendPerTick(value));
     }
+    function formatRatePerSecond(valuePerTick) {
+      const perSecond = valuePerTick / WORLD_TICK_SECONDS;
+      return Number.isInteger(perSecond) ? perSecond.toLocaleString() : perSecond.toFixed(1);
+    }
+    function formatTickRate(valuePerTick) {
+      return `${valuePerTick.toLocaleString()}/tick (${formatRatePerSecond(valuePerTick)}/s)`;
+    }
+    function gameTicksPerSecond() {
+      return WORLD_TICK_SECONDS > 0 ? (1 / WORLD_TICK_SECONDS) : 0;
+    }
+    function marchingDashOffset(speedUnitsPerSecond, timestampMs = Date.now()) {
+      return -((timestampMs / 1000) * speedUnitsPerSecond % DASH_CYCLE_LEN);
+    }
+    function attackFeatureKey(feature) {
+      const props = feature?.properties || {};
+      return String(props.id || `${props.fromNodeId || ""}:${props.toNodeId || ""}:${props.mode || ""}`);
+    }
     function actualNodeCoordinates(feature) {
       const lon = Number(feature?.properties?.longitude);
       const lat = Number(feature?.properties?.latitude);
@@ -281,6 +315,21 @@
     }
     function updateClickedNodeHighlight(feature = null) {
       map.getSource("selected-node")?.setData(featureCollectionFor(feature));
+    }
+    function updateHoveredNodeHighlight(feature = null) {
+      map.getSource("hover-node")?.setData(featureCollectionFor(feature));
+    }
+    function setHoveredPreviewTargetNode(targetNodeId = null) {
+      hoveredPreviewTargetNodeId = targetNodeId ? String(targetNodeId) : null;
+    }
+    function renderedFeatureByNodeId(nodeId) {
+      const id = String(nodeId || "");
+      if (!id) {
+        return null;
+      }
+      return renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === id)
+        || selectedNodeTargets.find((feature) => String(feature?.properties?.id || "") === id)
+        || null;
     }
     function findAttackFeature(fromNodeId, toNodeId) {
       return currentAttackFeatures.find((feature) => (
@@ -345,8 +394,10 @@
       let outgoing = 0;
       let incomingTransfer = 0;
       let incomingAttack = 0;
+      const effectiveFlowByAttackKey = computeEffectiveFlowByAttackKey();
       for (const attackFeature of attacksForNode(nodeId)) {
-        const sendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const configuredSendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const sendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(attackFeature)) ?? configuredSendPerTick;
         if (String(attackFeature?.properties?.fromNodeId || "") === nodeId) {
           outgoing += sendPerTick;
           continue;
@@ -367,6 +418,61 @@
     }
     function formatSignedTick(value) {
       return `${value >= 0 ? "+" : ""}${value.toLocaleString()}`;
+    }
+    function formatSignedTickRate(value) {
+      return `${formatSignedTick(value)}/tick (${value >= 0 ? "+" : ""}${formatRatePerSecond(value)}/s)`;
+    }
+    function sortedAttackFeaturesForSimulation() {
+      return [...currentAttackFeatures].sort((left, right) => {
+        const leftCreatedAt = Number(left?.properties?.createdAt || 0);
+        const rightCreatedAt = Number(right?.properties?.createdAt || 0);
+        if (leftCreatedAt !== rightCreatedAt) {
+          return leftCreatedAt - rightCreatedAt;
+        }
+        return attackFeatureKey(left).localeCompare(attackFeatureKey(right));
+      });
+    }
+    function computeEffectiveFlowByAttackKey() {
+      const nodeState = new Map();
+      for (const feature of renderedNodeFeatures) {
+        const nodeId = String(feature?.properties?.id || "");
+        if (!nodeId) {
+          continue;
+        }
+        nodeState.set(nodeId, {
+          army: Math.max(0, Number(feature?.properties?.army || 0)),
+          ownerState: String(feature?.properties?.ownerState || "neutral"),
+        });
+      }
+      for (const state of nodeState.values()) {
+        if (state.ownerState !== "neutral") {
+          state.army += 1;
+        }
+      }
+      const effectiveFlowByAttackKey = new Map();
+      for (const attackFeature of sortedAttackFeaturesForSimulation()) {
+        const key = attackFeatureKey(attackFeature);
+        const fromNodeId = String(attackFeature?.properties?.fromNodeId || "");
+        const toNodeId = String(attackFeature?.properties?.toNodeId || "");
+        const configuredSendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const sourceState = nodeState.get(fromNodeId);
+        if (!sourceState || sourceState.army <= 0) {
+          effectiveFlowByAttackKey.set(key, 0);
+          continue;
+        }
+        const effectiveSendPerTick = Math.max(0, Math.min(configuredSendPerTick, Math.floor(sourceState.army)));
+        sourceState.army = Math.max(0, sourceState.army - effectiveSendPerTick);
+        const targetState = nodeState.get(toNodeId);
+        if (targetState) {
+          if (String(attackFeature?.properties?.mode || "") === "transfer") {
+            targetState.army += effectiveSendPerTick;
+          } else {
+            targetState.army -= effectiveSendPerTick;
+          }
+        }
+        effectiveFlowByAttackKey.set(key, effectiveSendPerTick);
+      }
+      return effectiveFlowByAttackKey;
     }
     function routeSummaryLabel(feature, nodeId) {
       const fromId = String(feature?.properties?.fromNodeId || "");
@@ -391,7 +497,7 @@
       selectedNodeTargets = [];
       connectionTargetsSectionEl.classList.add("hidden");
       connectionTargetsListEl.replaceChildren();
-      connectionTargetsHintEl.textContent = "Click one of your nodes to load its directly adjacent road targets here.";
+      connectionTargetsHintEl.textContent = "Click your node to load adjacent targets.";
     }
     function renderSelectedNodeTargets() {
       if (
@@ -405,16 +511,17 @@
       if (!selectedNodeTargets.length) {
         connectionTargetsSectionEl.classList.remove("hidden");
         connectionTargetsListEl.replaceChildren();
-        connectionTargetsHintEl.textContent = `Node ${selectedNodeId} has no directly adjacent road targets right now.`;
+        connectionTargetsHintEl.textContent = `Node ${selectedNodeId} has no adjacent targets.`;
         return;
       }
       connectionTargetsSectionEl.classList.remove("hidden");
-      connectionTargetsHintEl.textContent = `Choose a directly adjacent road target for node ${selectedNodeId}.`;
+      connectionTargetsHintEl.textContent = `Adjacent targets for node ${selectedNodeId}.`;
       const fragment = document.createDocumentFragment();
       for (const targetFeature of selectedNodeTargets) {
         const targetNodeId = String(targetFeature?.properties?.id || "");
         const rowEl = document.createElement("div");
         rowEl.className = "route-row";
+        rowEl.dataset.targetNodeId = targetNodeId;
         const topEl = document.createElement("div");
         topEl.className = "route-row-top";
         const titleEl = document.createElement("div");
@@ -431,8 +538,38 @@
         buttonEl.className = findAttackFeature(selectedNodeId, targetNodeId) ? "secondary" : "";
         buttonEl.textContent = findAttackFeature(selectedNodeId, targetNodeId) ? "Remove" : "Connect";
         buttonEl.dataset.targetNodeId = targetNodeId;
+        buttonEl.addEventListener("mouseenter", () => {
+          setHoveredPreviewTargetNode(targetNodeId);
+          updateHoveredNodeHighlight(renderedFeatureByNodeId(targetNodeId) || targetFeature);
+          if (enterConnectMode()) {
+            void setPreviewTarget(targetFeature);
+          }
+        });
+        buttonEl.addEventListener("mouseleave", () => {
+          setHoveredPreviewTargetNode(null);
+          updateHoveredNodeHighlight(null);
+          if (previewTargetNodeId === targetNodeId) {
+            clearPreviewLine();
+            updateSelectionStatus();
+          }
+        });
         controlsEl.append(buttonEl);
         rowEl.append(topEl, controlsEl);
+        rowEl.addEventListener("mouseenter", () => {
+          setHoveredPreviewTargetNode(targetNodeId);
+          updateHoveredNodeHighlight(renderedFeatureByNodeId(targetNodeId) || targetFeature);
+          if (enterConnectMode()) {
+            void setPreviewTarget(targetFeature);
+          }
+        });
+        rowEl.addEventListener("mouseleave", () => {
+          setHoveredPreviewTargetNode(null);
+          updateHoveredNodeHighlight(null);
+          if (previewTargetNodeId === targetNodeId) {
+            clearPreviewLine();
+            updateSelectionStatus();
+          }
+        });
         fragment.append(rowEl);
       }
       connectionTargetsListEl.replaceChildren(fragment);
@@ -445,7 +582,7 @@
       const requestVersion = ++selectedNodeTargetsRequestVersion;
       connectionTargetsSectionEl.classList.remove("hidden");
       connectionTargetsListEl.replaceChildren();
-      connectionTargetsHintEl.textContent = `Loading adjacent road targets for node ${selectedNodeId}...`;
+      connectionTargetsHintEl.textContent = `Loading adjacent targets for node ${selectedNodeId}...`;
       try {
         const payload = await fetchJson(CONNECTABLE_NODES_URL, {
           method: "POST",
@@ -460,15 +597,17 @@
           return;
         }
         selectedNodeTargets = [...(payload.targets?.features || [])].sort((left, right) => String(left?.properties?.id || "").localeCompare(String(right?.properties?.id || "")));
+        connectableNodeIds = new Set(selectedNodeTargets.map((feature) => String(feature?.properties?.id || "")).filter(Boolean));
         renderSelectedNodeTargets();
       } catch (error) {
         if (requestVersion !== selectedNodeTargetsRequestVersion) {
           return;
         }
         selectedNodeTargets = [];
+        connectableNodeIds = new Set();
         connectionTargetsSectionEl.classList.remove("hidden");
         connectionTargetsListEl.replaceChildren();
-        connectionTargetsHintEl.textContent = `Adjacent target lookup failed: ${error.message}`;
+        connectionTargetsHintEl.textContent = `Adjacent check failed: ${error.message}`;
       }
     }
     async function updateAttackRate(fromNodeId, toNodeId, sendPerTick) {
@@ -501,7 +640,7 @@
         ));
         setAttackFeatures(nextFeatures);
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || null);
-        setStatus(`Updated route ${fromNodeId} -> ${toNodeId} to ${normalizeSendPerTick(sendPerTick).toLocaleString()} army per tick.`);
+        setStatus(`Route ${fromNodeId} -> ${toNodeId} set to ${normalizeSendPerTick(sendPerTick).toLocaleString()}/tick.`);
         void refreshGameState();
       } catch (error) {
         setStatus(`Route rate update failed: ${error.message}`);
@@ -534,14 +673,28 @@
         setStatus(`Route remove failed: ${error.message}`);
       }
     }
-    async function toggleConnectionToTargetNode(targetNodeId) {
+    async function toggleConnectionToTargetNode(targetNodeId, clickedFeature = null) {
       if (!sessionToken || !selectedNodeId || !selectedNodeFeature) {
         setStatus("Log in first, then click one of your nodes.");
         return;
       }
-      const targetFeature = selectedNodeTargets.find((feature) => String(feature?.properties?.id || "") === String(targetNodeId)) || null;
-      if (!targetFeature) {
-        setStatus(`Node ${targetNodeId} is not directly adjacent to node ${selectedNodeId}.`);
+      const activeRoute = findAttackFeature(selectedNodeId, targetNodeId);
+      let targetFeature = clickedFeature
+        || selectedNodeTargets.find((feature) => String(feature?.properties?.id || "") === String(targetNodeId))
+        || renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === String(targetNodeId))
+        || null;
+      if (!activeRoute && !selectedNodeTargets.some((feature) => String(feature?.properties?.id || "") === String(targetNodeId))) {
+        await refreshSelectedNodeTargets();
+        targetFeature = selectedNodeTargets.find((feature) => String(feature?.properties?.id || "") === String(targetNodeId))
+          || targetFeature;
+      }
+      const isAdjacentTarget = selectedNodeTargets.some((feature) => String(feature?.properties?.id || "") === String(targetNodeId));
+      if (!activeRoute && !isAdjacentTarget) {
+        if (String(targetFeature?.properties?.ownerState || "") === "self") {
+          selectSenderNode(targetFeature, `Selected node ${targetNodeId}.`);
+          return;
+        }
+        setStatus("Not adjacent.");
         return;
       }
       const sendPerTick = normalizeSendPerTick(sendPerTickInput.value);
@@ -561,7 +714,7 @@
             String(attackFeature?.properties?.fromNodeId || "") === selectedNodeId
             && String(attackFeature?.properties?.toNodeId || "") === String(targetNodeId)
           )));
-          setStatus(`Removed connection ${selectedNodeId} -> ${targetNodeId}.`);
+          setStatus(`Removed ${selectedNodeId} -> ${targetNodeId}.`);
         } else if (response.attack) {
           const nextFeatures = currentAttackFeatures.filter((attackFeature) => !(
             String(attackFeature?.properties?.fromNodeId || "") === selectedNodeId
@@ -570,14 +723,21 @@
           nextFeatures.push(response.attack);
           setAttackFeatures(nextFeatures);
           setStatus(String(targetFeature?.properties?.ownerState || "") === "self"
-            ? `Transfer started at ${sendPerTick.toLocaleString()} army per tick.`
-            : `Attack started at ${sendPerTick.toLocaleString()} army per tick.`);
+            ? `Transfer started at ${formatTickRate(sendPerTick)}.`
+            : `Attack started at ${formatTickRate(sendPerTick)}.`);
         }
         renderSelectedNodeTargets();
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || null);
         void refreshGameState();
       } catch (error) {
-        setStatus(`Connection failed: ${error.message}`);
+        if (
+          String(targetFeature?.properties?.ownerState || "") === "self"
+          && !findAttackFeature(selectedNodeId, targetNodeId)
+        ) {
+          selectSenderNode(targetFeature, `Selected node ${targetNodeId}.`);
+          return;
+        }
+        setStatus(`Connect failed: ${error.message}`);
       }
     }
     function renderNodeRouteList(feature = null) {
@@ -594,10 +754,13 @@
         return;
       }
       nodeRoutesSectionEl.classList.remove("hidden");
+      const effectiveFlowByAttackKey = computeEffectiveFlowByAttackKey();
       const fragment = document.createDocumentFragment();
       for (const routeFeature of routes) {
         const routeEl = document.createElement("div");
         routeEl.className = "route-row";
+        routeEl.dataset.fromNodeId = String(routeFeature?.properties?.fromNodeId || "");
+        routeEl.dataset.toNodeId = String(routeFeature?.properties?.toNodeId || "");
         const topEl = document.createElement("div");
         topEl.className = "route-row-top";
         const titleEl = document.createElement("div");
@@ -605,9 +768,10 @@
         titleEl.textContent = routeSummaryLabel(routeFeature, nodeId);
         const modeEl = document.createElement("div");
         modeEl.className = "route-row-mode";
-        const sendPerTick = normalizeSendPerTick(routeFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const configuredSendPerTick = normalizeSendPerTick(routeFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? configuredSendPerTick;
         const overlapCount = Number(routeFeature?.properties?.overlapCount || 1);
-        modeEl.textContent = `${String(routeFeature?.properties?.mode || "attack")} · ${sendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
+        modeEl.textContent = `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
 
@@ -623,7 +787,7 @@
           inputEl.min = "1";
           inputEl.max = "250";
           inputEl.step = "1";
-          inputEl.value = String(sendPerTick);
+          inputEl.value = String(configuredSendPerTick);
           inputEl.dataset.fromNodeId = String(routeFeature?.properties?.fromNodeId || "");
           inputEl.dataset.toNodeId = String(routeFeature?.properties?.toNodeId || "");
           const buttonEl = document.createElement("button");
@@ -643,9 +807,46 @@
           controlsEl.append(inputEl, buttonEl, deleteButtonEl);
           routeEl.append(controlsEl);
         }
+        const counterpartNodeId = String(routeFeature?.properties?.fromNodeId || "") === nodeId
+          ? String(routeFeature?.properties?.toNodeId || "")
+          : String(routeFeature?.properties?.fromNodeId || "");
+        routeEl.addEventListener("mouseenter", () => {
+          hoveredAttackKey = attackFeatureKey(routeFeature);
+          updateHoveredNodeHighlight(renderedFeatureByNodeId(counterpartNodeId));
+          routeEl.style.background = "rgba(250, 204, 21, 0.12)";
+          routeEl.style.borderRadius = "10px";
+          routeEl.style.paddingInline = "8px";
+        });
+        routeEl.addEventListener("mouseleave", () => {
+          if (hoveredAttackKey === attackFeatureKey(routeFeature)) {
+            hoveredAttackKey = null;
+          }
+          updateHoveredNodeHighlight(null);
+          routeEl.style.background = "";
+          routeEl.style.borderRadius = "";
+          routeEl.style.paddingInline = "";
+        });
+        routeEl.querySelectorAll("button, input").forEach((controlEl) => {
+          controlEl.addEventListener("mouseenter", () => {
+            hoveredAttackKey = attackFeatureKey(routeFeature);
+            updateHoveredNodeHighlight(renderedFeatureByNodeId(counterpartNodeId));
+          });
+          controlEl.addEventListener("mouseleave", () => {
+            if (hoveredAttackKey === attackFeatureKey(routeFeature)) {
+              hoveredAttackKey = null;
+            }
+            updateHoveredNodeHighlight(null);
+          });
+        });
         fragment.append(routeEl);
       }
       nodeRoutesListEl.replaceChildren(fragment);
+    }
+    function updateConnectModeActions(feature = null) {
+      const isSelfNode = String(feature?.properties?.ownerState || "") === "self";
+      connectModeActionsEl.classList.toggle("hidden", !isSelfNode);
+      armConnectButton.classList.toggle("secondary", !connectPreviewMode);
+      spaceConnectButton.classList.toggle("secondary", !connectPreviewMode);
     }
     function updateRouteControls(feature = null) {
       const inspectedId = String(feature?.properties?.id || "");
@@ -655,13 +856,15 @@
       if (routeFeature) {
         setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
         updateRouteRateButton.disabled = !sessionToken;
-        routeInfoHintEl.textContent = `Route ${selectedNodeId} -> ${inspectedId} is active. Update the send rate here, or click the same target again to remove the route.`;
+        routeInfoHintEl.textContent = `Route ${selectedNodeId} -> ${inspectedId} is active. Update it here or click again to remove it.`;
+        updateConnectModeActions(feature);
         return;
       }
       updateRouteRateButton.disabled = true;
       routeInfoHintEl.textContent = selectedNodeId
-        ? `How to connect: node ${selectedNodeId} is the sender. Use the adjacent target list in this panel.`
-        : "How to connect: click one of your nodes, then use the adjacent target list in this panel.";
+        ? `Sender ${selectedNodeId}. Press + or Space, then click an adjacent node.`
+        : "Click your node. Press + or Space to connect.";
+      updateConnectModeActions(feature);
     }
     function nodeDisplayOffsetDegrees(index, total, lat) {
       if (total <= 1) {
@@ -1087,11 +1290,13 @@
         nodeInfoArmyEl.textContent = "0";
         nodeInfoDeltaEl.textContent = "0";
         nodeInfoPositionEl.textContent = "-";
-        nodeInfoStatusEl.textContent = "Click any visible node to inspect it here.";
+        nodeInfoStatusEl.textContent = "Click a node.";
         updateRouteControls(null);
         clearSelectedNodeTargets();
         renderNodeRouteList(null);
         updateClickedNodeHighlight(null);
+        updateHoveredNodeHighlight(null);
+        setHoveredPreviewTargetNode(null);
         return;
       }
       nodeInfoEl.classList.remove("hidden");
@@ -1101,15 +1306,16 @@
       nodeInfoIdEl.textContent = String(feature.properties?.id || "Unknown");
       nodeInfoOwnerEl.textContent = nodeOwnerLabel(feature);
       nodeInfoArmyEl.textContent = Number(feature.properties?.army || 0).toLocaleString();
-      nodeInfoDeltaEl.textContent = formatSignedTick(perTick.net);
+      nodeInfoDeltaEl.textContent = formatSignedTickRate(perTick.net);
       nodeInfoPositionEl.textContent = coords ? `${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}` : "-";
       nodeInfoStatusEl.textContent = feature.properties?.ownerState === "self"
-        ? `This is your node. It gains +${perTick.passive}/tick, sends -${perTick.outgoing.toLocaleString()}/tick, receives +${perTick.incomingTransfer.toLocaleString()}/tick, and takes -${perTick.incomingAttack.toLocaleString()}/tick. Use the adjacent target list below to connect.`
-        : `This node gains ${perTick.passive ? `+${perTick.passive}` : "0"}/tick and is affected by any listed army lines below.`;
+        ? `+${perTick.passive}/tick, -${perTick.outgoing.toLocaleString()}/tick out, +${perTick.incomingTransfer.toLocaleString()}/tick in, -${perTick.incomingAttack.toLocaleString()}/tick hit. Click an adjacent node.`
+        : `${perTick.passive ? `+${perTick.passive}` : "0"}/tick base.`;
       updateRouteControls(feature);
       renderSelectedNodeTargets();
       renderNodeRouteList(feature);
       updateClickedNodeHighlight(feature);
+      updateConnectModeActions(feature);
     }
 
     function inspectNode(feature) {
@@ -1162,20 +1368,45 @@
       selectedNodeId = null;
       selectedNodeFeature = null;
       connectPreviewMode = false;
+      hoveredAttackKey = null;
+      setHoveredPreviewTargetNode(null);
       previewPathCache.clear();
       selectedNodeTextEl.textContent = "None";
       clearSelectedNodeTargets();
       clearConnectableTargets();
       clearPreviewLine();
+      updateHoveredNodeHighlight(null);
       updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
       setStatus(statusMessage);
+    }
+
+    function selectSenderNode(feature, statusMessage = "") {
+      const nodeId = String(feature?.properties?.id || "");
+      if (!nodeId) {
+        return;
+      }
+      inspectNode(feature);
+      selectedNodeId = nodeId;
+      selectedNodeFeature = feature;
+      connectPreviewMode = false;
+      hoveredAttackKey = null;
+      setHoveredPreviewTargetNode(null);
+      previewPathCache.clear();
+      selectedNodeTextEl.textContent = selectedNodeSummary(feature);
+      setSendPerTickValue(findAttackFeature(nodeId, inspectedNodeId)?.properties?.sendPerTick || sendPerTickInput.value);
+      clearPreviewLine();
+      clearConnectableTargets();
+      setStatus(statusMessage || `Selected node ${nodeId}.`);
+      void refreshSelectedNodeTargets();
+      updateRouteControls(feature);
+      updateSelectionStatus();
     }
 
     function defaultStatusMessage() {
       if (map.getZoom() < NODE_MIN_ZOOM) {
         return ZOOM_IN_MESSAGE;
       }
-      return "Click one of your green nodes, then use the node info panel to connect to a directly adjacent road target.";
+      return "Click your node, then click an adjacent node.";
     }
 
     function updateSelectionStatus() {
@@ -1184,18 +1415,18 @@
         return;
       }
       if (!connectPreviewMode) {
-        setStatus(`Selected node ${selectedNodeId}. Use the adjacent target buttons in the node info panel to connect.`);
+        setStatus(`Selected node ${selectedNodeId}. Click an adjacent node.`);
         return;
       }
       if (!connectableNodeIds.size) {
-        setStatus(`Selected node ${selectedNodeId}. Waiting for directly adjacent road targets in the visible map area.`);
+        setStatus(`Selected node ${selectedNodeId}. Waiting for adjacent targets.`);
         return;
       }
       if (previewTargetNodeId) {
-        setStatus(`Previewing the road path to node ${previewTargetNodeId}. Click to confirm the link, or press Escape to cancel.`);
+        setStatus(`Previewing ${previewTargetNodeId}.`);
         return;
       }
-      setStatus(`Selected node ${selectedNodeId}. ${connectableNodeIds.size.toLocaleString()} directly adjacent road targets are available. Hover a nearby node to preview the road path, then click to connect.`);
+      setStatus(`Selected node ${selectedNodeId}. ${connectableNodeIds.size.toLocaleString()} adjacent targets.`);
     }
 
     function connectableCandidateNodeIds() {
@@ -1331,12 +1562,27 @@
       }
     }
 
+    function enterConnectMode(statusMessage = "") {
+      if (!selectedNodeFeature || String(selectedNodeFeature?.properties?.ownerState || "") !== "self") {
+        setStatus("Select one of your nodes first.");
+        return false;
+      }
+      connectPreviewMode = true;
+      scheduleConnectableTargetsRefresh(0);
+      updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
+      if (statusMessage) {
+        setStatus(statusMessage);
+      } else {
+        updateSelectionStatus();
+      }
+      return true;
+    }
     function armSelectedNodeConnection() {
       if (!selectedNodeFeature) {
         setStatus("Select one of your green nodes first.");
         return;
       }
-      setStatus("Use the node info panel below to connect from the selected node.");
+      enterConnectMode(`Selected node ${selectedNodeId}. Click an adjacent node.`);
     }
 
     function cancelConnectionPreview() {
@@ -1345,8 +1591,12 @@
         return;
       }
       connectPreviewMode = false;
+      hoveredAttackKey = null;
+      updateHoveredNodeHighlight(null);
+      setHoveredPreviewTargetNode(null);
       clearPreviewLine();
       updateSelectionStatus();
+      updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
     }
 
     function handleNodeHoverPreview(event) {
@@ -1484,20 +1734,21 @@
       const mode = String(feature?.properties?.mode || "");
       const ownerState = String(feature?.properties?.ownerState || "");
       if (mode === "transfer") {
-        return `rgba(56, 189, 248, ${alpha})`;
+        return `rgba(14, 165, 233, ${alpha})`;
       }
       if (ownerState === "self") {
-        return `rgba(34, 197, 94, ${alpha})`;
+        return `rgba(14, 165, 233, ${alpha})`;
       }
       return `rgba(239, 68, 68, ${alpha})`;
     }
 
-    function drawConnectionPath(coords, color, width, dash = []) {
+    function drawConnectionPath(coords, color, width, dash = [], dashOffset = 0, lineCap = "round") {
       if (!Array.isArray(coords) || coords.length < 2) {
         return;
       }
       connectionCanvasContext.beginPath();
       connectionCanvasContext.setLineDash(dash);
+      connectionCanvasContext.lineDashOffset = dashOffset;
       let drewPoint = false;
       for (let index = 0; index < coords.length; index += 1) {
         const projected = map.project(coords[index]);
@@ -1513,14 +1764,23 @@
       }
       if (!drewPoint) {
         connectionCanvasContext.setLineDash([]);
+        connectionCanvasContext.lineDashOffset = 0;
         return;
       }
       connectionCanvasContext.strokeStyle = color;
       connectionCanvasContext.lineWidth = width;
       connectionCanvasContext.lineJoin = "round";
-      connectionCanvasContext.lineCap = "round";
+      connectionCanvasContext.lineCap = lineCap;
       connectionCanvasContext.stroke();
       connectionCanvasContext.setLineDash([]);
+      connectionCanvasContext.lineDashOffset = 0;
+    }
+
+    function drawMovingTransportLine(coords, color, width, dashOffset = 0) {
+      if (!Array.isArray(coords) || coords.length < 2) {
+        return;
+      }
+      drawConnectionPath(coords, color, width, [DASH_LEN, GAP_LEN], dashOffset, "butt");
     }
 
     function drawArrowHead(point, color, scale = 1) {
@@ -1549,45 +1809,95 @@
       connectionCanvasContext.restore();
     }
 
-    function drawLineRateLabel(point, label, color) {
-      if (!point?.coordinates || !label) {
-        return;
+    function segmentLengthPx(start, end) {
+      const projectedStart = map.project(start);
+      const projectedEnd = map.project(end);
+      const dx = projectedEnd.x - projectedStart.x;
+      const dy = projectedEnd.y - projectedStart.y;
+      return Math.sqrt((dx * dx) + (dy * dy));
+    }
+    function visibleNodeRadiusPx() {
+      const zoom = map.getZoom();
+      if (zoom <= NODE_MIN_ZOOM) {
+        return 10.5;
       }
-      const projected = map.project(point.coordinates);
-      const offsetX = 10;
-      const offsetY = -12;
-      connectionCanvasContext.save();
-      connectionCanvasContext.font = "600 12px Arial, Helvetica, sans-serif";
-      connectionCanvasContext.textAlign = "left";
-      connectionCanvasContext.textBaseline = "middle";
-      const textWidth = connectionCanvasContext.measureText(label).width;
-      const x = projected.x + offsetX;
-      const y = projected.y + offsetY;
-      connectionCanvasContext.fillStyle = "rgba(15, 23, 42, 0.88)";
-      connectionCanvasContext.beginPath();
-      connectionCanvasContext.roundRect(x - 5, y - 9, textWidth + 10, 18, 6);
-      connectionCanvasContext.fill();
-      connectionCanvasContext.strokeStyle = "rgba(148, 163, 184, 0.35)";
-      connectionCanvasContext.lineWidth = 1;
-      connectionCanvasContext.stroke();
-      connectionCanvasContext.fillStyle = color;
-      connectionCanvasContext.fillText(label, x, y);
-      connectionCanvasContext.restore();
+      if (zoom <= 13) {
+        const ratio = (zoom - NODE_MIN_ZOOM) / (13 - NODE_MIN_ZOOM);
+        return 10.5 + ((13.5 - 10.5) * ratio);
+      }
+      if (zoom <= 16) {
+        const ratio = (zoom - 13) / 3;
+        return 13.5 + ((17.5 - 13.5) * ratio);
+      }
+      return 17.5;
+    }
+    function trimmedLineCoords(coords, startKm, endKm) {
+      if (!Array.isArray(coords) || coords.length < 2 || endKm <= startKm) {
+        return [];
+      }
+      const startPoint = pointAlongLine(coords, startKm);
+      const endPoint = pointAlongLine(coords, endKm);
+      if (!startPoint?.coordinates || !endPoint?.coordinates) {
+        return [];
+      }
+      const out = [startPoint.coordinates];
+      let traveledKm = 0;
+      for (let index = 1; index < coords.length; index += 1) {
+        traveledKm += pointDistanceKm(coords[index - 1], coords[index]);
+        if (traveledKm > startKm && traveledKm < endKm) {
+          out.push(coords[index]);
+        }
+      }
+      const last = out[out.length - 1];
+      if (!last || last[0] !== endPoint.coordinates[0] || last[1] !== endPoint.coordinates[1]) {
+        out.push(endPoint.coordinates);
+      }
+      return out.length >= 2 ? out : [startPoint.coordinates, endPoint.coordinates];
+    }
+    function routeInteriorPaddingKm(coords, totalKm) {
+      let kmPerPx = 0;
+      for (let index = 1; index < coords.length; index += 1) {
+        const segmentKm = pointDistanceKm(coords[index - 1], coords[index]);
+        const segmentPx = segmentLengthPx(coords[index - 1], coords[index]);
+        if (segmentKm > 0 && segmentPx > 0) {
+          kmPerPx = segmentKm / segmentPx;
+          break;
+        }
+      }
+      const pixelPaddingKm = kmPerPx > 0 ? kmPerPx * Math.max(visibleNodeRadiusPx() - 1.2, 7) : 0;
+      return Math.min(Math.max(totalKm * 0.08, pixelPaddingKm, 0.02), Math.max((totalKm / 2) - 0.02, 0));
     }
 
     function renderAttackArrows(timestampMs = Date.now()) {
       ensureConnectionCanvasSize();
       connectionCanvasContext.clearRect(0, 0, connectionCanvasEl.clientWidth, connectionCanvasEl.clientHeight);
-      const zoomWidth = Math.max(2.4, Math.min(5.2, 1.1 + (map.getZoom() * 0.2)));
+      const effectiveFlowByAttackKey = computeEffectiveFlowByAttackKey();
+      const zoomWidth = Math.max(2.6, Math.min(5.0, 1.15 + (map.getZoom() * 0.18)));
       for (const previewFeature of currentPreviewFeatures) {
-        drawConnectionPath(previewFeature?.geometry?.coordinates, "rgba(203, 213, 225, 0.92)", Math.max(2, zoomWidth - 0.5), [5, 7]);
+        const previewCoords = previewFeature?.geometry?.coordinates;
+        if (!Array.isArray(previewCoords) || previewCoords.length < 2) {
+          continue;
+        }
+        let previewTotalKm = 0;
+        for (let index = 1; index < previewCoords.length; index += 1) {
+          previewTotalKm += pointDistanceKm(previewCoords[index - 1], previewCoords[index]);
+        }
+        const previewPaddingKm = routeInteriorPaddingKm(previewCoords, previewTotalKm);
+        const trimmedPreviewCoords = trimmedLineCoords(previewCoords, previewPaddingKm, Math.max(previewPaddingKm, previewTotalKm - previewPaddingKm));
+        const previewColor = hoveredPreviewTargetNodeId && previewTargetNodeId === hoveredPreviewTargetNodeId
+          ? "rgba(250, 204, 21, 0.98)"
+          : "rgba(148, 163, 184, 0.95)";
+        const previewWidth = hoveredPreviewTargetNodeId && previewTargetNodeId === hoveredPreviewTargetNodeId
+          ? zoomWidth + 2.8
+          : Math.max(2, zoomWidth - 0.55);
+        drawMovingTransportLine(trimmedPreviewCoords, previewColor, previewWidth, 0);
       }
+      const dimNonHoveredLines = Boolean(hoveredAttackKey);
       for (const attackFeature of currentAttackFeatures) {
         const coords = attackFeature?.geometry?.coordinates;
         if (!Array.isArray(coords) || coords.length < 2) {
           continue;
         }
-        drawConnectionPath(coords, connectionLineColor(attackFeature, 0.95), zoomWidth);
         let totalKm = 0;
         for (let index = 1; index < coords.length; index += 1) {
           totalKm += pointDistanceKm(coords[index - 1], coords[index]);
@@ -1596,26 +1906,18 @@
           continue;
         }
         const sendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
-        const color = connectionLineColor(attackFeature, 1);
-        const durationMs = Math.max(520, 2800 - (sendPerTick * 9));
-        const spacingKm = Math.max(0.16, Math.min(totalKm / 4, 0.65));
-        const arrowCount = Math.max(2, Math.min(9, Math.ceil(totalKm / spacingKm)));
-        const createdAtMs = Number(attackFeature?.properties?.createdAt || 0);
-        const phaseKm = ((Math.max(0, timestampMs - createdAtMs) % durationMs) / durationMs) * spacingKm;
-        for (let index = 0; index < arrowCount; index += 1) {
-          const alongKm = (phaseKm + (index * spacingKm)) % totalKm;
-          const point = pointAlongLine(coords, alongKm);
-          if (!point) {
-            continue;
-          }
-          drawArrowHead(point, color, 0.88);
+        const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(attackFeature)) ?? sendPerTick;
+        const isHoveredAttack = hoveredAttackKey === attackFeatureKey(attackFeature);
+        const color = connectionLineColor(attackFeature, isHoveredAttack || !dimNonHoveredLines ? 1 : 0.3);
+        const dashSpeedPerSecond = DASH_CYCLE_LEN * Math.max(0, effectiveSendPerTick);
+        const dashOffset = marchingDashOffset(dashSpeedPerSecond, timestampMs);
+        const edgePaddingKm = routeInteriorPaddingKm(coords, totalKm);
+        const trimmedCoords = trimmedLineCoords(coords, edgePaddingKm, Math.max(edgePaddingKm, totalKm - edgePaddingKm));
+        if (isHoveredAttack) {
+          drawMovingTransportLine(trimmedCoords, "rgba(255, 255, 255, 0.98)", zoomWidth + 5.4, dashOffset);
+          drawMovingTransportLine(trimmedCoords, "rgba(250, 204, 21, 0.98)", zoomWidth + 3.4, dashOffset);
         }
-        const labelPoint = pointAlongLine(coords, Math.min(totalKm * 0.58, totalKm - 0.001));
-        if (labelPoint) {
-          const perSecond = sendPerTick / 3;
-          const rateLabel = `${Number.isInteger(perSecond) ? perSecond.toLocaleString() : perSecond.toFixed(1)}/s`;
-          drawLineRateLabel(labelPoint, rateLabel, color);
-        }
+        drawMovingTransportLine(trimmedCoords, color, zoomWidth, dashOffset);
       }
       attackArrowAnimationFrame = window.requestAnimationFrame(renderAttackArrows);
     }
@@ -1739,29 +2041,24 @@
         setStatus("Log in first, then click one of your green nodes to open its connect panel.");
         return;
       }
-      if (props.ownerState === "self") {
+      if (selectedNodeId) {
         if (selectedNodeId === nodeId) {
-          clearSelection(`Cleared node ${nodeId}. Click another green node to pick a sender.`);
+          clearSelection(`Cleared node ${nodeId}. Click one of your nodes to pick a sender.`);
           inspectNode(feature);
           return;
         }
+        const existingRoute = findAttackFeature(selectedNodeId, nodeId);
+        const isKnownAdjacent = selectedNodeTargets.some((targetFeature) => String(targetFeature?.properties?.id || "") === nodeId);
+        if (props.ownerState === "self" && !existingRoute && selectedNodeTargets.length && !isKnownAdjacent) {
+          selectSenderNode(feature, `Selected node ${nodeId}. Click another node to connect.`);
+          return;
+        }
         inspectNode(feature);
-        selectedNodeId = nodeId;
-        selectedNodeFeature = feature;
-        connectPreviewMode = false;
-        previewPathCache.clear();
-        selectedNodeTextEl.textContent = selectedNodeSummary(feature);
-        setSendPerTickValue(findAttackFeature(nodeId, inspectedNodeId)?.properties?.sendPerTick || sendPerTickInput.value);
-        clearPreviewLine();
-        clearConnectableTargets();
-        setStatus(`Selected node ${nodeId}. Use the adjacent target list in the node info panel to connect.`);
-        void refreshSelectedNodeTargets();
-        updateRouteControls(feature);
-        updateSelectionStatus();
+        void toggleConnectionToTargetNode(nodeId, feature);
         return;
       }
-      if (selectedNodeId) {
-        setStatus(`Node ${selectedNodeId} is selected as your sender. Use its node info panel to connect.`);
+      if (props.ownerState === "self") {
+        selectSenderNode(feature);
         return;
       }
       inspectNode(feature);
@@ -2029,6 +2326,24 @@
     updateRouteRateButton.addEventListener("click", () => {
       void updateSelectedRouteRate();
     });
+    armConnectButton.addEventListener("click", () => {
+      armSelectedNodeConnection();
+    });
+    spaceConnectButton.addEventListener("click", () => {
+      armSelectedNodeConnection();
+    });
+    armConnectButton.addEventListener("mouseenter", () => {
+      updateHoveredNodeHighlight(selectedNodeFeature);
+    });
+    armConnectButton.addEventListener("mouseleave", () => {
+      updateHoveredNodeHighlight(null);
+    });
+    spaceConnectButton.addEventListener("mouseenter", () => {
+      updateHoveredNodeHighlight(selectedNodeFeature);
+    });
+    spaceConnectButton.addEventListener("mouseleave", () => {
+      updateHoveredNodeHighlight(null);
+    });
     nodeRoutesListEl.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-from-node-id][data-to-node-id]");
       if (!button) {
@@ -2093,9 +2408,9 @@
       }
       if (event.code === "Space") {
         event.preventDefault();
-        setStatus("Use the node info panel to connect from the selected node.");
+        armSelectedNodeConnection();
       } else if (event.code === "Escape") {
-        cancelConnectionPreview();
+        clearSelection(defaultStatusMessage());
       }
     });
     window.addEventListener("online", () => {
@@ -2122,6 +2437,7 @@
       map.addSource("game-nodes", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("connectable-nodes", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("selected-node", { type: "geojson", data: emptyFeatureCollection() });
+      map.addSource("hover-node", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("attack-preview", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("attack-lines", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("attack-flow-arrows", { type: "geojson", data: emptyFeatureCollection() });
@@ -2135,6 +2451,7 @@
       map.addLayer({ id: "connectable-node-rings", type: "circle", source: "connectable-nodes", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 12, 13, 15, 16, 18], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "rgba(0,0,0,0)", "circle-stroke-width": 0, "circle-opacity": 0 } });
       map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "self"], "#22c55e", ["==", ["get", "ownerState"], "enemy"], "#8b5cf6", "#e2e8f0"], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#0f172a", "circle-stroke-width": 1.8, "circle-opacity": 0.96 } });
       map.addLayer({ id: "selected-node-ring", type: "circle", source: "selected-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 16, 13, 20, 16, 25], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#facc15", "circle-stroke-width": 3.2, "circle-opacity": 1 } });
+      map.addLayer({ id: "hover-node-ring", type: "circle", source: "hover-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 15.5, 13, 19.5, 16, 24], "circle-color": "rgba(250, 204, 21, 0.18)", "circle-stroke-color": "#facc15", "circle-stroke-width": 4.2, "circle-opacity": 1 } });
       map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: 12, layout: { "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9.5, 13, 11, 16, 13], "text-allow-overlap": true, "text-ignore-placement": true, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#111111", "#f8fafc"], "text-halo-color": ["case", ["==", ["get", "ownerState"], "neutral"], "rgba(255,255,255,0.55)", "rgba(15,23,42,0.65)"], "text-halo-width": 0.6 } });
 
       map.on("click", "connectable-node-rings", handleNodeClick);

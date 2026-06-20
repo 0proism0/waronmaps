@@ -2,6 +2,8 @@
 *.pyc
 __pycache__/
 .runtime/
+*.log
+*.pid
 local_node_store/northern_new_england/
 rust_server/target/
 state_pbf/
