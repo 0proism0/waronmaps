@@ -2,6 +2,14 @@
 
 Persistent multiplayer road-based node strategy game built with Rust and MapLibre.
 
+## What Runs
+
+- Runtime server: Rust in `rust_server/`
+- Viewer: `openfreemap_viewer.html`
+- Cache/prepare step: Rust binary in `rust_server/src/bin/prepare_region_cache.rs`
+
+The project runtime is Rust-only.
+
 ## Rendering And UI
 
 - HTML is only used for 2D overlay UI:
@@ -31,9 +39,20 @@ Persistent multiplayer road-based node strategy game built with Rust and MapLibr
 
 - `openfreemap_viewer.html`: main frontend shell, overlays, canvas connection rendering
 - `rust_server/src/main.rs`: Rust backend, auth, world state, connection rules, JSON APIs
+- `rust_server/src/bin/prepare_region_cache.rs`: Rust cache/prepare step for prepared region data
 - `local_node_store/`: local region data and state boundaries
 - `vendor/`: local frontend dependencies
 - `sw.js`: service worker cache versioning
+
+## Dependencies
+
+Rust deps are installed automatically by Cargo when you build or run:
+
+```bash
+cargo build --manifest-path rust_server/Cargo.toml
+```
+
+- No Python dependency is required for runtime.
 
 ## Development
 
@@ -42,6 +61,11 @@ Run the app with:
 ```bash
 ./resume_node_map.sh
 ```
+
+This now does 2 Rust-only steps:
+
+- refresh cached region status files
+- start the Rust game server
 
 Open:
 
