@@ -731,13 +731,14 @@
       connectionTargetsListEl.replaceChildren();
       connectionTargetsHintEl.textContent = `Loading adjacent targets for node ${selectedNodeId}...`;
       try {
+        const candidateNodeIds = connectableCandidateNodeIds();
         const payload = await fetchJson(CONNECTABLE_NODES_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             token: sessionToken,
             fromNodeId: selectedNodeId,
-            nodeIds: [],
+            nodeIds: candidateNodeIds.length ? candidateNodeIds : [],
           }),
         });
         if (requestVersion !== selectedNodeTargetsRequestVersion) {
@@ -848,8 +849,6 @@
           selectSenderNode(targetFeature, `Selected node ${targetNodeId}.`);
           return;
         }
-        setStatus("Not adjacent.");
-        return;
       }
       const sendPerTick = normalizeSendPerTick(sendPerTickInput.value);
       const isPersonal = isPersonalMovement(targetFeature);
@@ -2399,12 +2398,6 @@
           inspectNode(feature);
           return;
         }
-        const existingRoute = findAttackFeature(selectedNodeId, nodeId);
-        const isKnownAdjacent = selectedNodeTargets.some((targetFeature) => String(targetFeature?.properties?.id || "") === nodeId);
-        if (props.ownerState === "self" && !existingRoute && selectedNodeTargets.length && !isKnownAdjacent) {
-          selectSenderNode(feature, `Selected node ${nodeId}. Click another node to connect.`);
-          return;
-        }
         inspectNode(feature);
         void toggleConnectionToTargetNode(nodeId, feature);
         return;
@@ -2949,12 +2942,20 @@
         inspectedNodeId = null;
         updateNodeInfo(null);
       });
-      map.on("zoomstart", () => { skipNextTileRefreshForZoom = true; });
-      map.on("zoomend", () => { skipNextTileRefreshForZoom = true; });
+      map.on("zoomstart", (event) => {
+        if (event?.originalEvent) {
+          skipNextTileRefreshForZoom = true;
+        }
+      });
+      map.on("zoomend", (event) => {
+        if (event?.originalEvent) {
+          skipNextTileRefreshForZoom = true;
+        }
+      });
       map.on("moveend", () => {
-        const causedByZoom = skipNextTileRefreshForZoom;
+        const causedByUserZoom = skipNextTileRefreshForZoom;
         skipNextTileRefreshForZoom = false;
-        if (causedByZoom && map.getZoom() >= NODE_MIN_ZOOM && renderedNodeFeatures.length) {
+        if (causedByUserZoom && map.getZoom() >= NODE_MIN_ZOOM && renderedNodeFeatures.length) {
           return;
         }
         scheduleVisibleTileRefresh();
