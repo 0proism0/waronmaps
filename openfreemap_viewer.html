@@ -274,7 +274,6 @@
     let lastVisibleTileRefreshStartedAt = 0;
     let activeVisibleTileRequestKey = "";
     let lastRenderedTileRequestKey = "";
-    let skipNextTileRefreshForZoom = false;
     let connectableRefreshTimer = null;
     let connectableRefreshVersion = 0;
     let connectableNodeIds = new Set();
@@ -2942,24 +2941,7 @@
         inspectedNodeId = null;
         updateNodeInfo(null);
       });
-      map.on("zoomstart", (event) => {
-        if (event?.originalEvent) {
-          skipNextTileRefreshForZoom = true;
-        }
-      });
-      map.on("zoomend", (event) => {
-        if (event?.originalEvent) {
-          skipNextTileRefreshForZoom = true;
-        }
-      });
-      map.on("moveend", () => {
-        const causedByUserZoom = skipNextTileRefreshForZoom;
-        skipNextTileRefreshForZoom = false;
-        if (causedByUserZoom && map.getZoom() >= NODE_MIN_ZOOM && renderedNodeFeatures.length) {
-          return;
-        }
-        scheduleVisibleTileRefresh();
-      });
+      map.on("moveend", () => { scheduleVisibleTileRefresh(); });
 
       installButtonPressEffects();
       loadLoginFormState();
