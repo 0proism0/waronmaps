@@ -167,6 +167,7 @@ struct AppData {
     state: GameState,
     node_repo: NodeRepo,
     boundary_repo: BoundaryRepo,
+    synced_graph_version: i64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -250,6 +251,7 @@ impl App {
                 state,
                 node_repo: NodeRepo::default(),
                 boundary_repo: BoundaryRepo::default(),
+                synced_graph_version: -1,
             }),
             ws_update_sender,
         })
@@ -609,6 +611,10 @@ impl App {
 
     fn sync_world_nodes_locked(&self, data: &mut AppData) -> Result<bool, String> {
         self.ensure_node_repo_fresh(data, false)?;
+        if data.synced_graph_version == data.node_repo.graph_version {
+            return Ok(false);
+        }
+        data.synced_graph_version = data.node_repo.graph_version;
         let mut modified = false;
         let valid_node_ids = data.node_repo.nodes_by_id.keys().cloned().collect::<HashSet<_>>();
 
