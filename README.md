@@ -6,6 +6,7 @@ Persistent multiplayer road-based node strategy game built with Rust and MapLibr
 
 - Runtime server: Rust in `rust_server/`
 - Viewer: `openfreemap_viewer.html`
+- OSM fetcher: Rust binary in `rust_server/src/bin/fetch_region_osm.rs`
 - S2/Hilbert node generator: Rust binary in `rust_server/src/bin/generate_nodes.rs`
 - Cache/prepare step: Rust binary in `rust_server/src/bin/prepare_region_cache.rs`
 
@@ -40,6 +41,7 @@ The project runtime is Rust-only.
 
 - `openfreemap_viewer.html`: main frontend shell, overlays, canvas connection rendering
 - `rust_server/src/main.rs`: Rust backend, auth, world state, S2 spatial index, WebSocket broadcaster, JSON APIs
+- `rust_server/src/bin/fetch_region_osm.rs`: Rust fetcher that pulls OSM road data from Overpass and derives `intersections.csv`
 - `rust_server/src/bin/generate_nodes.rs`: Rust generator that sorts intersections by S2 Hilbert curve
 - `rust_server/src/bin/prepare_region_cache.rs`: Rust cache/prepare step for prepared region data
 - `local_node_store/`: local region data and state boundaries
@@ -64,11 +66,17 @@ Run the app with:
 ./resume_node_map.sh
 ```
 
-This now does 3 Rust-only steps:
+This now does 4 Rust-only steps:
 
+- fetch OSM road data from Overpass if the prepared node dataset is missing (one-time, several minutes)
 - generate S2/Hilbert-sorted node data
 - refresh cached region status files
 - start the Rust game server
+
+The prepared node dataset (`local_node_store/northern_new_england/`) is gitignored,
+so a fresh checkout will trigger the one-time Overpass fetch on first run. It needs
+network access and the `curl` command. To re-fetch from scratch, delete that
+directory's `_overpass_cache/` and `intersections.csv`.
 
 The HTTP server listens on port `8002` and the WebSocket server listens on port `8003`. Set `WS_PORT` to change the WebSocket port.
 

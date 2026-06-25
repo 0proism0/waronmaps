@@ -11,8 +11,11 @@ SERVER_MAIN="$ROOT_DIR/rust_server/src/main.rs"
 SERVER_BIN="$ROOT_DIR/rust_server/target/release/node_game_server"
 PREPARE_BIN="$ROOT_DIR/rust_server/target/release/prepare_region_cache"
 GENERATE_BIN="$ROOT_DIR/rust_server/target/release/generate_nodes"
+FETCH_BIN="$ROOT_DIR/rust_server/target/release/fetch_region_osm"
 GENERATE_MAIN="$ROOT_DIR/rust_server/src/bin/generate_nodes.rs"
 PREPARE_MAIN="$ROOT_DIR/rust_server/src/bin/prepare_region_cache.rs"
+FETCH_MAIN="$ROOT_DIR/rust_server/src/bin/fetch_region_osm.rs"
+INTERSECTIONS_CSV="$ROOT_DIR/local_node_store/northern_new_england/intersections.csv"
 
 mkdir -p "$RUNTIME_DIR"
 cd "$ROOT_DIR"
@@ -33,9 +36,22 @@ release_conflicting_port() {
 }
 
 build_binaries() {
-  if [[ ! -x "$SERVER_BIN" || ! -x "$PREPARE_BIN" || ! -x "$GENERATE_BIN" || "$SERVER_MAIN" -nt "$SERVER_BIN" || "$PREPARE_MAIN" -nt "$PREPARE_BIN" || "$GENERATE_MAIN" -nt "$GENERATE_BIN" || "$SERVER_MANIFEST" -nt "$SERVER_BIN" || "$SERVER_MANIFEST" -nt "$PREPARE_BIN" || "$SERVER_MANIFEST" -nt "$GENERATE_BIN" ]]; then
+  if [[ ! -x "$SERVER_BIN" || ! -x "$PREPARE_BIN" || ! -x "$GENERATE_BIN" || ! -x "$FETCH_BIN" || "$SERVER_MAIN" -nt "$SERVER_BIN" || "$PREPARE_MAIN" -nt "$PREPARE_BIN" || "$GENERATE_MAIN" -nt "$GENERATE_BIN" || "$FETCH_MAIN" -nt "$FETCH_BIN" || "$SERVER_MANIFEST" -nt "$SERVER_BIN" || "$SERVER_MANIFEST" -nt "$PREPARE_BIN" || "$SERVER_MANIFEST" -nt "$GENERATE_BIN" || "$SERVER_MANIFEST" -nt "$FETCH_BIN" ]]; then
     cargo build --release --manifest-path "$SERVER_MANIFEST"
   fi
+}
+
+fetch_region_osm() {
+  # The prepared node dataset is gitignored, so bootstrap it from OpenStreetMap
+  # the first time it is missing. The fetcher itself skips any region tile whose
+  # _overpass_cache file already exists, so re-runs are cheap once data is present.
+  if [[ -f "$INTERSECTIONS_CSV" ]]; then
+    return 0
+  fi
+  build_binaries
+  echo "No prepared node data found; fetching OSM road data from Overpass (one-time, several minutes)..."
+  "$FETCH_BIN" "$ROOT_DIR" >>"$BUILDER_LOG" 2>&1
+  echo "Fetched OSM road data and built intersections.csv"
 }
 
 start_server() {
@@ -66,6 +82,7 @@ prepare_region_cache() {
   echo "Prepared cached region files"
 }
 
+fetch_region_osm
 generate_nodes
 prepare_region_cache
 start_server
