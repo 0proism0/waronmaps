@@ -19,6 +19,11 @@ use url::form_urlencoded;
 
 const WORLD_TICK_MS: u64 = 2500;
 const REPO_REFRESH_MS: i64 = 10_000;
+const ARMY_CAP: i64 = 1_000_000;
+const PLAYER_COLORS: &[&str] = &[
+    "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e", "#10b981", "#06b6d4",
+    "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#f43f5e", "#14b8a6", "#0ea5e9", "#a855f7",
+];
 
 #[derive(Clone, Copy)]
 struct BBox {
@@ -896,7 +901,7 @@ impl App {
             .collect::<Vec<_>>();
         for node_id in owned_node_ids {
             if let Some(node) = data.state.nodes.get_mut(&node_id) {
-                node.army = (node.army + 1).min(1_000_000);
+                node.army = (node.army + 1).min(ARMY_CAP);
             }
         }
 
@@ -948,7 +953,7 @@ impl App {
 
             if attack.mode == "transfer" {
                 if let Some(target_node) = data.state.nodes.get_mut(&attack.to_node_id) {
-                    target_node.army = (target_node.army + flow).min(1_000_000);
+                    target_node.army = (target_node.army + flow).min(ARMY_CAP);
                 }
                 continue;
             }
@@ -1183,11 +1188,12 @@ impl App {
             (Some(_), _) => "enemy",
             _ => "neutral",
         };
-        let owner_username = world_node
+        let owner = world_node
             .owner_id
             .as_deref()
-            .and_then(|owner_id| data.state.players.get(owner_id))
-            .map(|player| player.username.clone());
+            .and_then(|owner_id| data.state.players.get(owner_id));
+        let owner_username = owner.map(|player| player.username.clone());
+        let owner_color = owner.map(|player| player_color(&player.username));
         Some(json!({
             "type": "Feature",
             "properties": {
@@ -1199,6 +1205,7 @@ impl App {
                 "armyLabel": format_army_label(world_node.army),
                 "ownerId": world_node.owner_id,
                 "ownerUsername": owner_username,
+                "ownerColor": owner_color,
                 "ownerState": owner_state,
                 "canAttack": player_id.map(|id| world_node.owner_id.as_deref() != Some(id)).unwrap_or(false)
             },
@@ -1209,18 +1216,25 @@ impl App {
         }))
     }
 
-    fn attack_feature(&self, attack: &Attack, player_id: Option<&str>) -> Value {
+    fn attack_feature(&self, data: &AppData, attack: &Attack, player_id: Option<&str>) -> Value {
         let coordinates = attack
             .path
             .iter()
             .map(|pair| json!([pair[0], pair[1]]))
             .collect::<Vec<_>>();
+        let owner_color = data
+            .state
+            .players
+            .get(&attack.owner_id)
+            .map(|player| player_color(&player.username))
+            .unwrap_or_else(|| "#94a3b8".to_string());
         json!({
             "type": "Feature",
             "properties": {
                 "id": attack.id,
                 "ownerId": attack.owner_id,
                 "ownerState": if player_id == Some(attack.owner_id.as_str()) { "self" } else { "enemy" },
+                "ownerColor": owner_color,
                 "mode": attack.mode,
                 "createdAt": attack.created_at,
                 "sendPerTick": attack.send_per_tick,
@@ -1271,7 +1285,7 @@ impl App {
             .state
             .attacks
             .values()
-            .map(|attack| self.attack_feature(attack, player_id))
+            .map(|attack| self.attack_feature(&data, attack, player_id))
             .collect::<Vec<_>>();
         Ok(json!({
             "player": player_id.and_then(|player_id| data.state.players.get(player_id)).map(|player| json!({
@@ -1600,7 +1614,7 @@ impl App {
             .state
             .attacks
             .get(&attack_id)
-            .map(|attack| self.attack_feature(attack, Some(session.player_id.as_str())));
+            .map(|attack| self.attack_feature(&data, attack, Some(session.player_id.as_str())));
         Ok(json!({
             "ok": true,
             "attackId": attack_id,
@@ -1741,9 +1755,14 @@ fn haversine_km(a_lat: f64, a_lon: f64, b_lat: f64, b_lon: f64) -> f64 {
     6371.0 * 2.0 * h.sqrt().atan2((1.0 - h).sqrt())
 }
 
+fn player_color(username: &str) -> String {
+    let hash = Sha256::digest(username.as_bytes());
+    PLAYER_COLORS[hash[0] as usize % PLAYER_COLORS.len()].to_string()
+}
+
 fn format_army_label(value: i64) -> String {
     let army = value.max(0) as f64;
-    if army >= 1_000_000.0 {
+    if army >= ARMY_CAP as f64 {
         let millions = (army / 100_000.0).round() / 10.0;
         return if (millions.fract() - 0.0).abs() < f64::EPSILON {
             format!("{millions:.0}M")
