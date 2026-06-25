@@ -25,6 +25,24 @@ const PLAYER_COLORS: &[&str] = &[
     "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#f43f5e", "#14b8a6", "#0ea5e9", "#a855f7",
 ];
 
+fn random_player_color() -> String {
+    let mut bytes = [0u8; 8];
+    for b in bytes.iter_mut() {
+        *b = random::<u8>();
+    }
+    PLAYER_COLORS[bytes[0] as usize % PLAYER_COLORS.len()].to_string()
+}
+
+fn normalize_player_color(color: Option<&str>) -> String {
+    if let Some(c) = color {
+        let c = c.trim();
+        if c.len() == 7 && c.starts_with('#') && c.chars().skip(1).all(|ch| ch.is_ascii_hexdigit()) {
+            return c.to_ascii_lowercase();
+        }
+    }
+    random_player_color()
+}
+
 #[derive(Clone, Copy)]
 struct BBox {
     west: f64,
@@ -106,6 +124,8 @@ struct Player {
     password_hash: String,
     created_at: i64,
     start_node_ids: Vec<String>,
+    #[serde(default = "random_player_color")]
+    color: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -812,7 +832,7 @@ impl App {
         Ok(targets)
     }
 
-    fn register_player(&self, username: &str, password: &str) -> Result<Value, String> {
+    fn register_player(&self, username: &str, password: &str, color: Option<&str>) -> Result<Value, String> {
         let normalized = username.trim().to_lowercase();
         if normalized.len() < 3 {
             return Err("Username must be at least 3 characters.".to_string());
@@ -844,6 +864,7 @@ impl App {
                 password_hash: sha256_hex(password),
                 created_at: now_ms(),
                 start_node_ids: start_nodes.clone(),
+                color: normalize_player_color(color),
             },
         );
         data.state.usernames.insert(normalized, player_id.clone());
@@ -1193,7 +1214,7 @@ impl App {
             .as_deref()
             .and_then(|owner_id| data.state.players.get(owner_id));
         let owner_username = owner.map(|player| player.username.clone());
-        let owner_color = owner.map(|player| player_color(&player.username));
+        let owner_color = owner.map(|player| player.color.clone());
         Some(json!({
             "type": "Feature",
             "properties": {
@@ -1226,8 +1247,8 @@ impl App {
             .state
             .players
             .get(&attack.owner_id)
-            .map(|player| player_color(&player.username))
-            .unwrap_or_else(|| "#94a3b8".to_string());
+            .map(|player| player.color.clone())
+            .unwrap_or_else(random_player_color);
         json!({
             "type": "Feature",
             "properties": {
@@ -1290,7 +1311,8 @@ impl App {
         Ok(json!({
             "player": player_id.and_then(|player_id| data.state.players.get(player_id)).map(|player| json!({
                 "id": player.id,
-                "username": player.username
+                "username": player.username,
+                "color": player.color
             })),
             "buildStatus": self.current_build_status(),
             "ownedNodes": {
@@ -1755,11 +1777,6 @@ fn haversine_km(a_lat: f64, a_lon: f64, b_lat: f64, b_lon: f64) -> f64 {
     6371.0 * 2.0 * h.sqrt().atan2((1.0 - h).sqrt())
 }
 
-fn player_color(username: &str) -> String {
-    let hash = Sha256::digest(username.as_bytes());
-    PLAYER_COLORS[hash[0] as usize % PLAYER_COLORS.len()].to_string()
-}
-
 fn format_army_label(value: i64) -> String {
     let army = value.max(0) as f64;
     if army >= ARMY_CAP as f64 {
@@ -2192,7 +2209,8 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 let body = parse_body_json(&mut request)?;
                 let username = body.get("username").and_then(Value::as_str).unwrap_or_default();
                 let password = body.get("password").and_then(Value::as_str).unwrap_or_default();
-                Ok(json_response(200, &app.register_player(username, password)?))
+                let color = body.get("color").and_then(Value::as_str);
+                Ok(json_response(200, &app.register_player(username, password, color)?))
             }
             (&Method::Post, "/api/login") => {
                 let body = parse_body_json(&mut request)?;
