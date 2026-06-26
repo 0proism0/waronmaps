@@ -178,6 +178,7 @@
         <div class="actions">
           <button id="refreshLeaderboardButton" type="button" class="secondary">Refresh</button>
           <button id="locateNodesButton" type="button">Locate My Nodes</button>
+          <button id="showTutorialButton" type="button" class="secondary">How to Play</button>
         </div>
       </div>
       <div class="section">
@@ -305,6 +306,7 @@
     const hidePanelButton = document.getElementById("hidePanelButton");
     const locateNodesButton = document.getElementById("locateNodesButton");
     const refreshLeaderboardButton = document.getElementById("refreshLeaderboardButton");
+    const showTutorialButton = document.getElementById("showTutorialButton");
     const leaderboardListEl = document.getElementById("leaderboardList");
     const colorPicker = document.getElementById("colorPicker");
     const colorSwatches = document.getElementById("colorSwatches");
@@ -1499,6 +1501,11 @@
     }
     tutorialNextButton.addEventListener("click", nextTutorialStep);
     tutorialSkipButton.addEventListener("click", hideTutorial);
+    showTutorialButton.addEventListener("click", () => {
+      tutorialStepIndex = 0;
+      updateTutorialStep();
+      tutorialOverlay.classList.add("show");
+    });
     function maybeShowTutorial() {
       if (localStorage.getItem(TUTORIAL_KEY) !== "seen") {
         showTutorial();
@@ -3286,7 +3293,6 @@
         attackArrowAnimationFrame = window.requestAnimationFrame(renderAttackArrows);
       }
       if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-      maybeShowTutorial();
       });
     }
 
