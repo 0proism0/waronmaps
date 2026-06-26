@@ -118,6 +118,8 @@
     .color-swatch { width: 28px; height: 28px; border-radius: 999px; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15); transition: transform 0.12s ease; }
     .color-swatch:hover { transform: scale(1.12); }
     .color-swatch.selected { border-color: #f8fafc; box-shadow: 0 0 0 2px #000, 0 0 0 4px #f8fafc; }
+    .color-swatch.locked { opacity: 0.35; cursor: not-allowed; }
+    .color-swatch:disabled { opacity: 0.25; pointer-events: none; }
     @media (max-width: 640px) {
       .panel { top: auto; left: 0; right: 0; bottom: 0; transform: none; width: 100%; max-height: 70vh; border-radius: 18px 18px 0 0; transition: transform 0.3s ease, opacity 0.3s ease; }
       .panel.hidden { display: block; transform: translateY(110%); opacity: 0; pointer-events: none; }
@@ -261,7 +263,7 @@
     const STATE_BOUNDARIES_URL = "/local_node_store/us_state_boundaries.geojson";
     const BUILD_STATUS_URL = "/api/build-status";
     const GAME_STATE_URL = "/api/game-state";
-    const NODE_TILE_URL = "/api/node-tile";
+    const NODE_TILE_URL = "/api/node-tile?v=2";
     const CONNECTABLE_NODES_URL = "/api/connectable-nodes";
     const CONNECTION_PREVIEW_URL = "/api/connection-preview";
     const CONNECTION_RATE_URL = "/api/connection-rate";
@@ -276,7 +278,7 @@
     const LAST_BUILD_STATUS_KEY = "node-game-build-status-v1";
     const LAST_OWNED_VIEW_KEY = "node-game-owned-view-v1";
     const TUTORIAL_KEY = "node-game-tutorial-v1";
-    const MINIMAP_KEY = "node-game-minimap-v1";
+    const MINIMAP_KEY = "node-game-minimap-v2";
     const BUILD_POLL_MS = 3000;
     const GAME_POLL_MS = 5500;
     const NETWORK_RETRY_MS = 10 * 60 * 1000;
@@ -296,7 +298,7 @@
     const ZOOM_IN_MESSAGE = "Please zoom in to see nodes.";
     const DEFAULT_SEND_PER_TICK = 1;
     const HIDE_NODE_INFORMATION_TEST = false;
-    const PLAYER_COLOR_PALETTE = ["#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e", "#10b981", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#f43f5e", "#14b8a6", "#0ea5e9", "#a855f7"];
+    const PLAYER_COLOR_PALETTE = ["#c81c1c", "#c8391c", "#c8561c", "#c8721c", "#c88f1c", "#c8ac1c", "#c8c81c", "#acc81c", "#8fc81c", "#72c81c", "#56c81c", "#39c81c", "#1cc81c", "#1cc839", "#1cc856", "#1cc872", "#1cc88f", "#1cc8ac", "#1cc8c8", "#1cacc8", "#1c8fc8", "#1c72c8", "#1c56c8", "#1c39c8", "#1c1cc8", "#391cc8", "#561cc8", "#721cc8", "#8f1cc8", "#ac1cc8", "#c81cc8", "#c81cac", "#c81c8f", "#c81c72", "#c81c56", "#c81c39"];
 
     const panelEl = document.getElementById("panel");
     const showPanelButton = document.getElementById("showPanelButton");
@@ -399,6 +401,7 @@
     let hoveredAttackKey = null;
     let hoveredPreviewTargetNodeId = null;
     let chosenPlayerColor = PLAYER_COLOR_PALETTE[Math.floor(Math.random() * PLAYER_COLOR_PALETTE.length)];
+    let chosenColorConfirmed = false;
     let hoverPreviewTargetId = null;
     let hoverPreviewTimer = 0;
     const nodeTileResponseCache = new Map();
@@ -1249,22 +1252,40 @@
       });
     }
     function setStatus(message) { statusEl.textContent = message; }
+    function updateColorPickerUI() {
+      colorSwatches.querySelectorAll(".color-swatch").forEach((s) => {
+        const isSelected = s.dataset.color === chosenPlayerColor;
+        s.classList.toggle("selected", isSelected);
+        s.classList.toggle("locked", chosenColorConfirmed);
+        s.disabled = chosenColorConfirmed && !isSelected;
+      });
+      registerButton.disabled = !chosenColorConfirmed;
+    }
+    function setColorPickerVisible(visible) {
+      colorPicker.classList.toggle("hidden", !visible);
+    }
     function initColorPicker() {
       colorSwatches.replaceChildren();
       PLAYER_COLOR_PALETTE.forEach((color) => {
         const swatch = document.createElement("button");
         swatch.type = "button";
         swatch.className = "color-swatch";
+        swatch.dataset.color = color;
         swatch.style.backgroundColor = color;
         swatch.title = color;
         if (color === chosenPlayerColor) swatch.classList.add("selected");
         swatch.addEventListener("click", () => {
-          chosenPlayerColor = color;
-          colorSwatches.querySelectorAll(".color-swatch").forEach((s) => s.classList.remove("selected"));
-          swatch.classList.add("selected");
+          if (chosenColorConfirmed) return;
+          if (confirm(`Lock in ${color} as your color? You cannot change it after registering.`)) {
+            chosenPlayerColor = color;
+            chosenColorConfirmed = true;
+            updateColorPickerUI();
+            showToast(`Color ${color} locked. Register to claim it.`, "success");
+          }
         });
         colorSwatches.appendChild(swatch);
       });
+      registerButton.disabled = !chosenColorConfirmed;
     }
     function showToast(message, type = "info", duration = 3000) {
       const toast = document.createElement("div");
@@ -1324,7 +1345,7 @@
     function savePanelState() { localStorage.setItem(PANEL_KEY, panelEl.classList.contains("hidden") ? "hidden" : "visible"); }
     function setAuthPending(pending, actionLabel = "Working") {
       authRequestInFlight = pending;
-      registerButton.disabled = pending;
+      registerButton.disabled = pending || !chosenColorConfirmed;
       loginButton.disabled = pending;
       logoutButton.disabled = pending;
       usernameInput.disabled = pending;
@@ -1441,6 +1462,7 @@
     function toggleMinimap() {
       const hidden = minimapContainer.classList.toggle("hidden");
       try { localStorage.setItem(MINIMAP_KEY, hidden ? "hidden" : "visible"); } catch {}
+      if (!hidden) renderMinimap();
     }
     function loadMinimapState() {
       const stored = localStorage.getItem(MINIMAP_KEY);
@@ -2948,6 +2970,7 @@
           : "Register or log in to claim 10 starting nodes.";
         activeAttackCountEl.textContent = (state.attacks?.features || []).length.toLocaleString();
         fetchLeaderboard();
+        setColorPickerVisible(!state.player);
         if (state.player && ownedFeatures.length) {
           if (!panelAutoHiddenForSession) {
             hideMainPanel(true);
@@ -3039,6 +3062,7 @@
         hideMainPanel(true);
         panelAutoHiddenForSession = true;
         showToast(`${actionLabel} successful. Loading your nodes...`, "success");
+        setColorPickerVisible(false);
         connectWebSocket();
         await refreshGameState();
         scheduleVisibleTileRefresh(0, true);
@@ -3135,6 +3159,10 @@
       map.getSource("attack-preview")?.setData(emptyFeatureCollection());
       setStatus(defaultStatusMessage());
       showToast("Logged out.", "info");
+      chosenColorConfirmed = false;
+      chosenPlayerColor = PLAYER_COLOR_PALETTE[Math.floor(Math.random() * PLAYER_COLOR_PALETTE.length)];
+      initColorPicker();
+      setColorPickerVisible(true);
       fetchLeaderboard();
       showMainPanel(true);
       if (activeRegion?.active_region) {
@@ -3197,7 +3225,7 @@
       map.addLayer({ id: "self-node-ring", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["==", ["get", "ownerState"], "self"], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 13, 13, 17, 16, 21], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#22c55e", "circle-stroke-width": 2.2, "circle-opacity": 0.85 } });
       map.addLayer({ id: "selected-node-ring", type: "circle", source: "selected-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 16, 13, 20, 16, 25], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#facc15", "circle-stroke-width": 3.2, "circle-opacity": 1 } });
       map.addLayer({ id: "hover-node-ring", type: "circle", source: "hover-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 15.5, 13, 19.5, 16, 24], "circle-color": "rgba(250, 204, 21, 0.18)", "circle-stroke-color": "#facc15", "circle-stroke-width": 4.2, "circle-opacity": 1 } });
-      map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: 12, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9.5, 13, 11, 16, 13], "text-allow-overlap": true, "text-ignore-placement": true, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#111111", "#f8fafc"], "text-halo-color": ["case", ["==", ["get", "ownerState"], "neutral"], "rgba(255,255,255,0.55)", "rgba(15,23,42,0.65)"], "text-halo-width": 0.6 } });
+      map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: 12, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9.5, 13, 11, 16, 13], "text-allow-overlap": true, "text-ignore-placement": true, "icon-allow-overlap": true, "icon-ignore-placement": true, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": "#000000", "text-halo-color": "rgba(255,255,255,0.85)", "text-halo-width": 1.0 } });
 
       map.on("click", "connectable-node-rings", handleNodeClick);
       map.on("click", "game-node-circles", handleNodeClick);

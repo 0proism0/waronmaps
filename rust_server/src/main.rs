@@ -21,8 +21,11 @@ const WORLD_TICK_MS: u64 = 2500;
 const REPO_REFRESH_MS: i64 = 10_000;
 const ARMY_CAP: i64 = 1_000_000;
 const PLAYER_COLORS: &[&str] = &[
-    "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e", "#10b981", "#06b6d4",
-    "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#f43f5e", "#14b8a6", "#0ea5e9", "#a855f7",
+    "#c81c1c", "#c8391c", "#c8561c", "#c8721c", "#c88f1c", "#c8ac1c", "#c8c81c", "#acc81c",
+    "#8fc81c", "#72c81c", "#56c81c", "#39c81c", "#1cc81c", "#1cc839", "#1cc856", "#1cc872",
+    "#1cc88f", "#1cc8ac", "#1cc8c8", "#1cacc8", "#1c8fc8", "#1c72c8", "#1c56c8", "#1c39c8",
+    "#1c1cc8", "#391cc8", "#561cc8", "#721cc8", "#8f1cc8", "#ac1cc8", "#c81cc8", "#c81cac",
+    "#c81c8f", "#c81c72", "#c81c56", "#c81c39",
 ];
 
 fn random_player_color() -> String {
