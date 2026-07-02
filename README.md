@@ -32,10 +32,11 @@ The project runtime is Rust-only.
 ## Current Gameplay Flow
 
 1. Register or log in.
-2. Click one of your own green nodes.
-3. Use the bottom-right node info panel.
-4. In `Adjacent Targets`, click `Connect` on a directly adjacent node.
-5. Adjust `army per tick` from the same panel.
+2. Click one of your own green nodes to inspect it and see its adjacent targets.
+3. Hold **Space** to enter link mode.
+4. Click and drag from the selected node; a dotted line will follow your cursor.
+5. Release the mouse on a different, adjacent node to create the link.
+6. Adjust `army per tick` from the bottom-right panel.
 
 ## Project Structure
 

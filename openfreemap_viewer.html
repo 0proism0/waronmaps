@@ -146,7 +146,7 @@
       <button id="hidePanelButton" class="panel-close secondary" type="button" aria-label="Close">×</button>
     </div>
     <div class="panel-body">
-      <p class="panel-subtitle">White nodes start with 10 army. Select one of your green nodes, then click an adjacent node to move troops.</p>
+      <p class="panel-subtitle">White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.</p>
       <div class="section">
         <div id="authSummary" class="status">Register or log in to claim 10 starting nodes.</div>
         <input id="usernameInput" placeholder="username" autocomplete="username">
@@ -200,20 +200,16 @@
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
     <div class="route-controls">
-      <div id="connectModeActions" class="connect-mode-actions hidden">
-        <button id="armConnectButton" type="button" class="icon-button" title="Connect">+</button>
-        <button id="spaceConnectButton" type="button" class="secondary shortcut-button" title="Space">Space</button>
-      </div>
       <label for="sendPerTickInput">New connection army per 3s tick</label>
       <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
-      <div id="routeInfoHint" class="hint">Click your node, then click an adjacent node.</div>
+      <div id="routeInfoHint" class="hint">Hold Space and drag from one of your nodes to an adjacent node to link.</div>
       <div class="actions">
         <button id="updateRouteRateButton" type="button" class="secondary">Update Route Rate</button>
       </div>
     </div>
     <div id="connectionTargetsSection" class="route-list hidden">
       <div class="route-list-title">Adjacent Targets</div>
-      <div id="connectionTargetsHint" class="hint">Click one of your nodes to load its directly adjacent road targets here.</div>
+      <div id="connectionTargetsHint" class="hint">Hold Space and drag from the selected node to one of these adjacent targets.</div>
       <div id="connectionTargetsList"></div>
     </div>
     <div id="nodeRoutesSection" class="route-list hidden">
@@ -240,7 +236,7 @@
       </div>
       <div class="tutorial-step" data-step="2">
         <div class="tutorial-title">Make a connection</div>
-        <div class="tutorial-text">Click one of your green nodes to select it, then click an adjacent node. This opens a road connection that moves troops every tick.</div>
+        <div class="tutorial-text">Hold Space and drag from one of your green nodes to an adjacent node. A dotted line will follow your cursor; release on the target to open a road connection that moves troops every tick.</div>
       </div>
       <div class="tutorial-step" data-step="3">
         <div class="tutorial-title">Adjust your army flow</div>
@@ -264,9 +260,8 @@
     const STATE_BOUNDARIES_URL = "/local_node_store/us_state_boundaries.geojson";
     const BUILD_STATUS_URL = "/api/build-status";
     const GAME_STATE_URL = "/api/game-state";
-    const NODE_TILE_URL = "/api/node-tile?v=2";
+    const NODE_TILE_URL = "/api/node-tile";
     const CONNECTABLE_NODES_URL = "/api/connectable-nodes";
-    const CONNECTION_PREVIEW_URL = "/api/connection-preview";
     const CONNECTION_RATE_URL = "/api/connection-rate";
     const CONNECTION_REMOVE_URL = "/api/connection-remove";
     const WS_URL = "ws://localhost:8003/ws";
@@ -293,7 +288,6 @@
     const NODE_DATA_MIN_ZOOM = 12;
     const NODE_DATA_MAX_ZOOM = 14;
     const MAX_VISIBLE_NODE_TILES = 16;
-    const MAX_CONNECTABLE_CANDIDATES = 1500;
     const VISIBLE_TILE_REFRESH_COOLDOWN_MS = 5000;
     const NODE_TILE_CACHE_TTL_MS = 5 * 60 * 1000;
     const ZOOM_IN_MESSAGE = "Please zoom in to see nodes.";
@@ -302,6 +296,7 @@
     const PLAYER_COLOR_PALETTE = ["#c81c1c", "#c8391c", "#c8561c", "#c8721c", "#c88f1c", "#c8ac1c", "#c8c81c", "#acc81c", "#8fc81c", "#72c81c", "#56c81c", "#39c81c", "#1cc81c", "#1cc839", "#1cc856", "#1cc872", "#1cc88f", "#1cc8ac", "#1cc8c8", "#1cacc8", "#1c8fc8", "#1c72c8", "#1c56c8", "#1c39c8", "#1c1cc8", "#391cc8", "#561cc8", "#721cc8", "#8f1cc8", "#ac1cc8", "#c81cc8", "#c81cac", "#c81c8f", "#c81c72", "#c81c56", "#c81c39"];
 
     const panelEl = document.getElementById("panel");
+    const panelTitleEl = document.getElementById("panelTitle");
     const showPanelButton = document.getElementById("showPanelButton");
     const hidePanelButton = document.getElementById("hidePanelButton");
     const locateNodesButton = document.getElementById("locateNodesButton");
@@ -325,6 +320,7 @@
     const loginButton = document.getElementById("loginButton");
     const logoutButton = document.getElementById("logoutButton");
     const authSummaryEl = document.getElementById("authSummary");
+    const regionTextEl = document.getElementById("regionText");
     const renderedNodeCountEl = document.getElementById("renderedNodeCount");
     const activeAttackCountEl = document.getElementById("activeAttackCount");
     const selectedNodeTextEl = document.getElementById("selectedNodeText");
@@ -339,9 +335,6 @@
     const sendPerTickInput = document.getElementById("sendPerTickInput");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
-    const connectModeActionsEl = document.getElementById("connectModeActions");
-    const armConnectButton = document.getElementById("armConnectButton");
-    const spaceConnectButton = document.getElementById("spaceConnectButton");
     const connectionCanvasEl = document.getElementById("connectionCanvas");
     const connectionTargetsSectionEl = document.getElementById("connectionTargetsSection");
     const connectionTargetsHintEl = document.getElementById("connectionTargetsHint");
@@ -367,8 +360,11 @@
     let renderedNodeFeatures = [];
     let renderedNodeFeatureMap = new Map();
     let selectedNodeFeature = null;
-    let previewTargetNodeId = null;
-    let connectPreviewMode = false;
+    let spacePressed = false;
+    let linkDragState = null;
+    let linkDragCursor = { x: 0, y: 0 };
+    let linkDragSnapTarget = null;
+    let linkDragSnapPoint = { x: 0, y: 0 };
     let nextBuildPollDelayMs = BUILD_POLL_MS;
     let nextGamePollDelayMs = GAME_POLL_MS;
     let lastWorldUpdateRefreshAt = 0;
@@ -378,17 +374,11 @@
     let lastVisibleTileRefreshStartedAt = 0;
     let activeVisibleTileRequestKey = "";
     let lastRenderedTileRequestKey = "";
-    let connectableRefreshTimer = null;
-    let connectableRefreshVersion = 0;
     let connectableNodeIds = new Set();
-    let previewPathCache = new Map();
-    let activePreviewPathAbortController = null;
-    let previewPathRequestVersion = 0;
     let panelAutoHiddenForSession = false;
     let inspectedNodeId = null;
     let authRequestInFlight = false;
     let currentAttackFeatures = [];
-    let currentPreviewFeatures = [];
     let cachedEffectiveFlow = null;
     let cachedEffectiveFlowKey = "";
     let cachedProjectedPaths = new Map();
@@ -401,11 +391,8 @@
     let lastAttackRenderTime = 0;
     const ATTACK_RENDER_INTERVAL_MS = 33;
     let hoveredAttackKey = null;
-    let hoveredPreviewTargetNodeId = null;
     let chosenPlayerColor = PLAYER_COLOR_PALETTE[Math.floor(Math.random() * PLAYER_COLOR_PALETTE.length)];
     let chosenColorConfirmed = false;
-    let hoverPreviewTargetId = null;
-    let hoverPreviewTimer = 0;
     const nodeTileResponseCache = new Map();
     const connectionCanvasContext = connectionCanvasEl.getContext("2d");
     const loadingScreenEl = document.getElementById("loadingScreen");
@@ -459,9 +446,6 @@
     }
     function updateHoveredNodeHighlight(feature = null) {
       map.getSource("hover-node")?.setData(featureCollectionFor(feature));
-    }
-    function setHoveredPreviewTargetNode(targetNodeId = null) {
-      hoveredPreviewTargetNodeId = targetNodeId ? String(targetNodeId) : null;
     }
     function renderedFeatureByNodeId(nodeId) {
       const id = String(nodeId || "");
@@ -653,10 +637,7 @@
       const attackKey = currentAttackFeatures
         .map((feature) => `${feature?.properties?.fromNodeId || ""}->${feature?.properties?.toNodeId || ""}|${feature?.properties?.id || ""}`)
         .join(",");
-      const previewKey = currentPreviewFeatures
-        .map((feature) => `preview-${feature?.properties?.fromNodeId || ""}->${feature?.properties?.toNodeId || ""}`)
-        .join(",");
-      return `${camera}::${attackKey}::${previewKey}`;
+      return `${camera}::${attackKey}`;
     }
     function getProjectedPath(coords, featureId) {
       const key = `${projectedPathsCacheKey()}|${featureId}`;
@@ -760,14 +741,13 @@
         clearSelectedNodeTargets();
         return;
       }
+      connectionTargetsSectionEl.classList.remove("hidden");
       if (!selectedNodeTargets.length) {
-        connectionTargetsSectionEl.classList.remove("hidden");
         connectionTargetsListEl.replaceChildren();
         connectionTargetsHintEl.textContent = `Node ${selectedNodeId} has no adjacent targets.`;
         return;
       }
-      connectionTargetsSectionEl.classList.remove("hidden");
-      connectionTargetsHintEl.textContent = `Adjacent targets for node ${selectedNodeId}.`;
+      connectionTargetsHintEl.textContent = `Adjacent targets for node ${selectedNodeId}. Hold Space and drag to one of these nodes to link.`;
       const fragment = document.createDocumentFragment();
       for (const targetFeature of selectedNodeTargets) {
         const targetNodeId = String(targetFeature?.properties?.id || "");
@@ -783,44 +763,12 @@
         modeEl.className = "route-row-mode";
         modeEl.textContent = `${nodeOwnerLabel(targetFeature)} · ${Number(targetFeature?.properties?.army || 0).toLocaleString()} army`;
         topEl.append(titleEl, modeEl);
-        const controlsEl = document.createElement("div");
-        controlsEl.className = "route-row-controls";
-        const buttonEl = document.createElement("button");
-        buttonEl.type = "button";
-        buttonEl.className = findAttackFeature(selectedNodeId, targetNodeId) ? "secondary" : "";
-        buttonEl.textContent = findAttackFeature(selectedNodeId, targetNodeId) ? "Remove" : "Connect";
-        buttonEl.dataset.targetNodeId = targetNodeId;
-        buttonEl.addEventListener("mouseenter", () => {
-          setHoveredPreviewTargetNode(targetNodeId);
-          updateHoveredNodeHighlight(renderedFeatureByNodeId(targetNodeId) || targetFeature);
-          if (enterConnectMode()) {
-            void setPreviewTarget(targetFeature);
-          }
-        });
-        buttonEl.addEventListener("mouseleave", () => {
-          setHoveredPreviewTargetNode(null);
-          updateHoveredNodeHighlight(null);
-          if (previewTargetNodeId === targetNodeId) {
-            clearPreviewLine();
-            updateSelectionStatus();
-          }
-        });
-        controlsEl.append(buttonEl);
-        rowEl.append(topEl, controlsEl);
+        rowEl.append(topEl);
         rowEl.addEventListener("mouseenter", () => {
-          setHoveredPreviewTargetNode(targetNodeId);
           updateHoveredNodeHighlight(renderedFeatureByNodeId(targetNodeId) || targetFeature);
-          if (enterConnectMode()) {
-            void setPreviewTarget(targetFeature);
-          }
         });
         rowEl.addEventListener("mouseleave", () => {
-          setHoveredPreviewTargetNode(null);
           updateHoveredNodeHighlight(null);
-          if (previewTargetNodeId === targetNodeId) {
-            clearPreviewLine();
-            updateSelectionStatus();
-          }
         });
         fragment.append(rowEl);
       }
@@ -992,9 +940,6 @@
             ? `Transfer started at ${formatTickRate(sendPerTick)}.`
             : `Attack started at ${formatTickRate(sendPerTick)}.`, "success");
         }
-        connectPreviewMode = false;
-        clearConnectableTargets();
-        clearPreviewLine();
         updateSelectionStatus();
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
         renderSelectedNodeTargets();
@@ -1116,12 +1061,6 @@
       }
       nodeRoutesListEl.replaceChildren(fragment);
     }
-    function updateConnectModeActions(feature = null) {
-      const isSelfNode = String(feature?.properties?.ownerState || "") === "self";
-      connectModeActionsEl.classList.toggle("hidden", !isSelfNode);
-      armConnectButton.classList.toggle("secondary", !connectPreviewMode);
-      spaceConnectButton.classList.toggle("secondary", !connectPreviewMode);
-    }
     function updateRouteControls(feature = null) {
       const inspectedId = String(feature?.properties?.id || "");
       const routeFeature = selectedNodeId && inspectedId && inspectedId !== selectedNodeId
@@ -1131,14 +1070,12 @@
         setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
         updateRouteRateButton.disabled = !sessionToken;
         routeInfoHintEl.textContent = `Route ${selectedNodeId} -> ${inspectedId} is active. Update it here or click again to remove it.`;
-        updateConnectModeActions(feature);
         return;
       }
       updateRouteRateButton.disabled = true;
       routeInfoHintEl.textContent = selectedNodeId
-        ? `Sender ${selectedNodeId}. Press + or Space, then click an adjacent node.`
-        : "Click your node. Press + or Space to connect.";
-      updateConnectModeActions(feature);
+        ? `Sender ${selectedNodeId}. Hold Space and drag to an adjacent node to link.`
+        : "Click one of your nodes, then hold Space and drag to an adjacent node to link.";
     }
     function nodeDisplayOffsetDegrees(index, total, lat) {
       if (total <= 1) {
@@ -1838,7 +1775,6 @@
         renderNodeRouteList(null);
         updateClickedNodeHighlight(null);
         updateHoveredNodeHighlight(null);
-        setHoveredPreviewTargetNode(null);
         return;
       }
       nodeInfoEl.classList.remove("hidden");
@@ -1852,15 +1788,12 @@
       nodeInfoPositionEl.textContent = coords ? `${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}` : "-";
       const isSelectedNode = String(feature.properties?.id || "") === String(selectedNodeId || "");
       nodeInfoStatusEl.textContent = feature.properties?.ownerState === "self"
-        ? (connectPreviewMode && isSelectedNode
-          ? "Please click another node to link."
-          : `+${perTick.passive}/tick, -${perTick.outgoing.toLocaleString()}/tick out, +${perTick.incomingTransfer.toLocaleString()}/tick in, -${perTick.incomingAttack.toLocaleString()}/tick hit. Click an adjacent node.`)
+        ? `+${perTick.passive}/tick, -${perTick.outgoing.toLocaleString()}/tick out, +${perTick.incomingTransfer.toLocaleString()}/tick in, -${perTick.incomingAttack.toLocaleString()}/tick hit. Hold Space and drag to an adjacent node to link.`
         : `${perTick.passive ? `+${perTick.passive}` : "0"}/tick base.`;
       updateRouteControls(feature);
       renderSelectedNodeTargets();
       renderNodeRouteList(feature);
       updateClickedNodeHighlight(feature);
-      updateConnectModeActions(feature);
     }
 
     function inspectNode(feature) {
@@ -1891,35 +1824,18 @@
       }
     }
 
-    function abortPreviewPathRequest() {
-      activePreviewPathAbortController?.abort();
-      activePreviewPathAbortController = null;
-      previewPathRequestVersion += 1;
-    }
-
     function clearConnectableTargets() {
       connectableNodeIds = new Set();
       map.getSource("connectable-nodes")?.setData(emptyFeatureCollection());
     }
 
-    function clearPreviewLine() {
-      abortPreviewPathRequest();
-      previewTargetNodeId = null;
-      currentPreviewFeatures = [];
-      map.getSource("attack-preview")?.setData(emptyFeatureCollection());
-    }
-
     function clearSelection(statusMessage = "Selection cleared.") {
       selectedNodeId = null;
       selectedNodeFeature = null;
-      connectPreviewMode = false;
       hoveredAttackKey = null;
-      setHoveredPreviewTargetNode(null);
-      previewPathCache.clear();
       selectedNodeTextEl.textContent = "None";
       clearSelectedNodeTargets();
       clearConnectableTargets();
-      clearPreviewLine();
       updateHoveredNodeHighlight(null);
       updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
       setStatus(statusMessage);
@@ -1934,19 +1850,18 @@
       selectedNodeId = nodeId;
       selectedNodeFeature = feature;
       hoveredAttackKey = null;
-      setHoveredPreviewTargetNode(null);
-      previewPathCache.clear();
       selectedNodeTextEl.textContent = selectedNodeSummary(feature);
       setSendPerTickValue(findAttackFeature(nodeId, inspectedNodeId)?.properties?.sendPerTick || sendPerTickInput.value);
-      clearPreviewLine();
-      enterConnectMode(statusMessage || `Selected node ${nodeId}. Click an adjacent node.`);
+      clearConnectableTargets();
+      void refreshSelectedNodeTargets();
+      setStatus(statusMessage || `Selected node ${nodeId}. Hold Space and drag to an adjacent node to link.`);
     }
 
     function defaultStatusMessage() {
       if (map.getZoom() < NODE_MIN_ZOOM) {
         return ZOOM_IN_MESSAGE;
       }
-      return "Click your node, then click an adjacent node.";
+      return "Hold Space and drag from one of your nodes to an adjacent node to link.";
     }
 
     function updateSelectionStatus() {
@@ -1954,251 +1869,164 @@
         setStatus(defaultStatusMessage());
         return;
       }
-      if (!connectPreviewMode) {
-        setStatus(`Selected node ${selectedNodeId}. Click an adjacent node.`);
-        return;
-      }
-      if (!connectableNodeIds.size) {
-        setStatus(`Selected node ${selectedNodeId}. Waiting for adjacent targets.`);
-        return;
-      }
-      if (previewTargetNodeId) {
-        setStatus(`Previewing ${previewTargetNodeId}.`);
-        return;
-      }
-      setStatus(`Selected node ${selectedNodeId}. ${connectableNodeIds.size.toLocaleString()} adjacent targets.`);
+      setStatus(`Selected node ${selectedNodeId}. Hold Space and drag to an adjacent node to link.`);
     }
 
-    function connectableCandidateNodeIds() {
-      if (!selectedNodeFeature) {
-        return [];
+    function mouseEventToMapPoint(event) {
+      if (!map) {
+        return { x: event.clientX, y: event.clientY };
       }
-      const selectedCoords = actualNodeCoordinates(selectedNodeFeature);
-      if (!selectedCoords) {
-        return [];
-      }
-      const candidates = renderedNodeFeatures
-        .filter((feature) => String(feature.properties?.id || "") !== selectedNodeId)
-        .map((feature) => {
-          const coords = actualNodeCoordinates(feature);
-          if (!coords) {
-            return null;
-          }
-          const lonDelta = (coords[0] - selectedCoords[0]) * Math.cos((((coords[1] + selectedCoords[1]) / 2) * Math.PI) / 180);
-          const latDelta = coords[1] - selectedCoords[1];
-          return {
-            id: String(feature.properties?.id || ""),
-            distance: (lonDelta * lonDelta) + (latDelta * latDelta),
-          };
-        })
-        .filter(Boolean)
-        .sort((left, right) => left.distance - right.distance)
-        .slice(0, MAX_CONNECTABLE_CANDIDATES);
-      return candidates.map((candidate) => candidate.id);
+      const rect = map.getCanvas().getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
     }
 
-    async function refreshConnectableTargets() {
-      if (!sessionToken || !selectedNodeFeature || !selectedNodeId || !connectPreviewMode) {
-        clearConnectableTargets();
-        return;
+    function findNodeFeatureAtPoint(point) {
+      if (!map) {
+        return null;
       }
-      const candidateNodeIds = connectableCandidateNodeIds();
-      const requestVersion = ++connectableRefreshVersion;
-      if (!candidateNodeIds.length) {
-        clearConnectableTargets();
-        updateSelectionStatus();
-        return;
-      }
-      const payload = await fetchJson(CONNECTABLE_NODES_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: sessionToken,
-          fromNodeId: selectedNodeId,
-          nodeIds: candidateNodeIds,
-        }),
+      const hitFeatures = map.queryRenderedFeatures(point, {
+        layers: ["connectable-node-rings", "game-node-circles", "game-node-labels"],
       });
-      if (requestVersion !== connectableRefreshVersion) {
-        return;
+      return hitFeatures[0] || null;
+    }
+
+    function findAdjacentSnapTarget(point) {
+      if (!map || !linkDragState) {
+        return null;
       }
-      const features = payload.targets?.features || [];
-      connectableNodeIds = new Set(features.map((feature) => String(feature.properties?.id || "")).filter(Boolean));
-      map.getSource("connectable-nodes")?.setData({
-        type: "FeatureCollection",
-        features,
+      const radius = 14;
+      const box = [[point.x - radius, point.y - radius], [point.x + radius, point.y + radius]];
+      const hitFeatures = map.queryRenderedFeatures(box, {
+        layers: ["connectable-node-rings", "game-node-circles", "game-node-labels"],
       });
-      if (previewTargetNodeId && !connectableNodeIds.has(previewTargetNodeId)) {
-        clearPreviewLine();
+      const fromNodeId = linkDragState.fromNodeId;
+      const candidates = (hitFeatures || []).filter((feature) => {
+        const targetId = String(feature?.properties?.id || "");
+        return targetId && targetId !== fromNodeId && connectableNodeIds.has(targetId);
+      });
+      if (!candidates.length) {
+        return null;
       }
-      updateSelectionStatus();
+      const projectedCandidates = candidates.map((feature) => {
+        const coords = actualNodeCoordinates(feature);
+        const projected = coords ? projectCached(coords) : { x: Infinity, y: Infinity };
+        const dx = projected.x - point.x;
+        const dy = projected.y - point.y;
+        return { feature, distanceSq: (dx * dx) + (dy * dy) };
+      });
+      projectedCandidates.sort((a, b) => a.distanceSq - b.distanceSq);
+      return projectedCandidates[0].feature;
     }
 
-    function scheduleConnectableTargetsRefresh(delayMs = 0) {
-      if (connectableRefreshTimer) {
-        window.clearTimeout(connectableRefreshTimer);
-      }
-      if (connectableNodeIds.size) {
+    function updateLinkDragPanState() {
+      if (!map) {
         return;
       }
-      connectableRefreshTimer = window.setTimeout(() => {
-        connectableRefreshTimer = null;
-        refreshConnectableTargets().catch((error) => setStatus(`Adjacent target lookup failed: ${error.message}`));
-      }, delayMs);
-    }
-
-    async function setPreviewTarget(targetFeature) {
-      const targetId = String(targetFeature?.properties?.id || "");
-      if (!connectPreviewMode || !selectedNodeFeature || !targetId || targetId === selectedNodeId || !connectableNodeIds.has(targetId)) {
-        clearPreviewLine();
-        updateSelectionStatus();
-        return;
-      }
-      const cacheKey = `${selectedNodeId}:${targetId}`;
-      previewTargetNodeId = targetId;
-      if (previewPathCache.has(cacheKey)) {
-        currentPreviewFeatures = previewPathCache.get(cacheKey)?.features || [];
-        map.getSource("attack-preview")?.setData(previewPathCache.get(cacheKey));
-        updateSelectionStatus();
-        return;
-      }
-      abortPreviewPathRequest();
-      previewTargetNodeId = targetId;
-      map.getSource("attack-preview")?.setData(emptyFeatureCollection());
-      setStatus(`Loading the road path to node ${targetId}...`);
-      const controller = new AbortController();
-      activePreviewPathAbortController = controller;
-      const requestVersion = ++previewPathRequestVersion;
-      try {
-        const payload = await fetchJson(CONNECTION_PREVIEW_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: sessionToken,
-            fromNodeId: selectedNodeId,
-            toNodeId: targetId,
-          }),
-          signal: controller.signal,
-        });
-        if (
-          controller.signal.aborted
-          || requestVersion !== previewPathRequestVersion
-          || previewTargetNodeId !== targetId
-        ) {
-          return;
-        }
-        const pathData = payload.path || emptyFeatureCollection();
-        previewPathCache.set(cacheKey, pathData);
-      currentPreviewFeatures = pathData.features || [];
-        map.getSource("attack-preview")?.setData(pathData);
-        updateSelectionStatus();
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        previewTargetNodeId = null;
-        map.getSource("attack-preview")?.setData(emptyFeatureCollection());
-        setStatus(`Road preview failed: ${error.message}`);
-      } finally {
-        if (activePreviewPathAbortController === controller) {
-          activePreviewPathAbortController = null;
-        }
-      }
-    }
-    function scheduleHoverPreview(targetFeature) {
-      const targetId = String(targetFeature?.properties?.id || "");
-      if (!targetId || hoverPreviewTargetId === targetId) {
-        return;
-      }
-      hoverPreviewTargetId = targetId;
-      if (hoverPreviewTimer) {
-        window.clearTimeout(hoverPreviewTimer);
-        hoverPreviewTimer = 0;
-      }
-      const cacheKey = `${selectedNodeId}:${targetId}`;
-      if (previewPathCache.has(cacheKey)) {
-        setPreviewTarget(targetFeature);
-        return;
-      }
-      hoverPreviewTimer = window.setTimeout(() => {
-        hoverPreviewTimer = 0;
-        if (hoverPreviewTargetId !== targetId) {
-          return;
-        }
-        setPreviewTarget(targetFeature);
-      }, 80);
-    }
-    function clearHoverPreviewSchedule() {
-      hoverPreviewTargetId = null;
-      if (hoverPreviewTimer) {
-        window.clearTimeout(hoverPreviewTimer);
-        hoverPreviewTimer = 0;
+      const wantDisabled = spacePressed || linkDragState !== null;
+      const isDisabled = !map.dragPan.isEnabled();
+      if (wantDisabled && !isDisabled) {
+        map.dragPan.disable();
+      } else if (!wantDisabled && isDisabled) {
+        map.dragPan.enable();
       }
     }
 
-    function enterConnectMode(statusMessage = "") {
-      if (!selectedNodeFeature || String(selectedNodeFeature?.properties?.ownerState || "") !== "self") {
-        showToast("Select one of your nodes first.", "info");
+    function startLinkDrag(feature, point) {
+      const nodeId = String(feature?.properties?.id || "");
+      if (!nodeId || String(feature?.properties?.ownerState || "") !== "self") {
         return false;
       }
-      connectPreviewMode = true;
+      selectedNodeId = nodeId;
+      selectedNodeFeature = feature;
+      selectedNodeTextEl.textContent = selectedNodeSummary(feature);
+      linkDragState = {
+        fromNodeId: nodeId,
+        fromFeature: feature,
+      };
+      linkDragCursor = { x: point.x, y: point.y };
+      updateLinkDragPanState();
+      map.getCanvas().style.cursor = "crosshair";
       void refreshSelectedNodeTargets();
-      if (String(inspectedNodeId || "") === String(selectedNodeId || "")) {
-        updateNodeInfo(selectedNodeFeature);
-      }
-      updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
-      if (statusMessage) {
-        setStatus(statusMessage);
-      } else {
-        updateSelectionStatus();
-      }
+      setStatus(`Linking from node ${nodeId}. Drag to an adjacent node.`);
       return true;
     }
-    function armSelectedNodeConnection() {
-      if (!selectedNodeFeature) {
-        showToast("Select one of your green nodes first.", "info");
+
+    function updateLinkDragCursor(point) {
+      if (!linkDragState) {
         return;
       }
-      enterConnectMode(`Selected node ${selectedNodeId}. Click an adjacent node.`);
+      linkDragCursor = { x: point.x, y: point.y };
+      const targetFeature = findAdjacentSnapTarget(point);
+      if (targetFeature) {
+        const targetId = String(targetFeature.properties?.id || "");
+        const coords = actualNodeCoordinates(targetFeature);
+        const projected = coords ? projectCached(coords) : point;
+        linkDragSnapTarget = targetFeature;
+        linkDragSnapPoint = { x: projected.x, y: projected.y };
+        map.getCanvas().style.cursor = "copy";
+        updateHoveredNodeHighlight(targetFeature);
+        setStatus(`Release to link node ${linkDragState.fromNodeId} -> ${targetId}.`);
+      } else {
+        linkDragSnapTarget = null;
+        linkDragSnapPoint = { x: 0, y: 0 };
+        map.getCanvas().style.cursor = "crosshair";
+        updateHoveredNodeHighlight(null);
+        setStatus(`Linking from node ${linkDragState.fromNodeId}. Drag to an adjacent node.`);
+      }
     }
 
-    function cancelConnectionPreview() {
-      if (!selectedNodeFeature) {
-        clearSelection(defaultStatusMessage());
+    function finishLinkDrag(point) {
+      if (!linkDragState) {
         return;
       }
-      connectPreviewMode = false;
-      hoveredAttackKey = null;
+      const fromNodeId = linkDragState.fromNodeId;
+      const targetFeature = linkDragSnapTarget || findAdjacentSnapTarget(point);
+      linkDragState = null;
+      linkDragCursor = { x: 0, y: 0 };
+      linkDragSnapTarget = null;
+      linkDragSnapPoint = { x: 0, y: 0 };
+      updateLinkDragPanState();
       updateHoveredNodeHighlight(null);
-      setHoveredPreviewTargetNode(null);
-      clearPreviewLine();
-      updateSelectionStatus();
-      updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
+      map.getCanvas().style.cursor = "";
+      if (!targetFeature) {
+        setStatus(`Link from node ${fromNodeId} cancelled.`);
+        return;
+      }
+      const targetNodeId = String(targetFeature.properties?.id || "");
+      if (!targetNodeId || targetNodeId === fromNodeId) {
+        setStatus(`Link from node ${fromNodeId} cancelled.`);
+        return;
+      }
+      if (!connectableNodeIds.has(targetNodeId)) {
+        showToast("That node is not adjacent to the source node.", "info");
+        setStatus(`Link from node ${fromNodeId} cancelled.`);
+        return;
+      }
+      inspectNode(targetFeature);
+      void toggleConnectionToTargetNode(targetNodeId, targetFeature);
     }
 
-    function handleNodeHoverPreview(event) {
-      if (!connectPreviewMode || !selectedNodeFeature) {
+    function cancelLinkDrag() {
+      if (!linkDragState) {
         return;
       }
-      const feature = event.features?.[0];
-      if (!feature) {
-        return;
-      }
-      const targetId = String(feature.properties?.id || "");
-      if (!connectableNodeIds.has(targetId) || targetId === selectedNodeId) {
-        clearPreviewLine();
-        updateSelectionStatus();
-        return;
-      }
-      scheduleHoverPreview(feature);
+      const fromNodeId = linkDragState.fromNodeId;
+      linkDragState = null;
+      linkDragCursor = { x: 0, y: 0 };
+      linkDragSnapTarget = null;
+      linkDragSnapPoint = { x: 0, y: 0 };
+      updateLinkDragPanState();
+      updateHoveredNodeHighlight(null);
+      map.getCanvas().style.cursor = "";
+      setStatus(`Link from node ${fromNodeId} cancelled.`);
     }
 
     function handleNodeLeave() {
       map.getCanvas().style.cursor = "";
-      clearHoverPreviewSchedule();
-      if (connectPreviewMode && selectedNodeFeature) {
-        clearPreviewLine();
-        updateSelectionStatus();
-      }
+      updateHoveredNodeHighlight(null);
     }
 
     async function loadGenerationTargetFeatures(region) {
@@ -2512,21 +2340,26 @@
       connectionCanvasContext.clearRect(0, 0, connectionCanvasEl.clientWidth, connectionCanvasEl.clientHeight);
       const effectiveFlowByAttackKey = getCachedEffectiveFlow();
       const zoomWidth = Math.max(2.6, Math.min(5.0, 1.15 + (map.getZoom() * 0.18)));
-      for (const previewFeature of currentPreviewFeatures) {
-        const previewCoords = previewFeature?.geometry?.coordinates;
-        if (!Array.isArray(previewCoords) || previewCoords.length < 2) {
-          continue;
+      if (linkDragState) {
+        const fromCoords = actualNodeCoordinates(linkDragState.fromFeature);
+        const toPoint = linkDragSnapTarget ? linkDragSnapPoint : linkDragCursor;
+        if (fromCoords && Number.isFinite(toPoint.x) && Number.isFinite(toPoint.y)) {
+          const cursorLngLat = map.unproject([toPoint.x, toPoint.y]);
+          const endCoords = linkDragSnapTarget ? actualNodeCoordinates(linkDragSnapTarget) : [cursorLngLat.lng, cursorLngLat.lat];
+          if (endCoords) {
+            const rawCoords = [fromCoords, endCoords];
+            const totalPx = totalLineLengthPx(rawCoords);
+            const paddingPx = Math.min(routeInteriorPaddingPx(), totalPx / 3);
+            const linkCoords = totalPx > paddingPx * 2
+              ? trimmedLineCoordsByPixels(rawCoords, paddingPx, Math.max(paddingPx, totalPx - paddingPx))
+              : rawCoords;
+            const targetFeature = linkDragSnapTarget || findNodeFeatureAtPoint(linkDragCursor);
+            const previewMode = targetFeature && isPersonalMovement(targetFeature) ? "transfer" : "attack";
+            const previewFeature = { properties: { mode: previewMode, ownerState: "self" } };
+            const linkColor = connectionLineColor(previewFeature, 1);
+            drawConnectionPath(linkCoords, linkColor, zoomWidth, [DASH_LEN, GAP_LEN], 0, "butt");
+          }
         }
-        const previewTotalPx = totalLineLengthPx(previewCoords);
-        const previewPaddingPx = Math.min(routeInteriorPaddingPx(), previewTotalPx / 3);
-        const trimmedPreviewCoords = trimmedLineCoordsByPixels(previewCoords, previewPaddingPx, Math.max(previewPaddingPx, previewTotalPx - previewPaddingPx));
-        const previewColor = hoveredPreviewTargetNodeId && previewTargetNodeId === hoveredPreviewTargetNodeId
-          ? "rgba(250, 204, 21, 0.98)"
-          : "rgba(148, 163, 184, 0.95)";
-        const previewWidth = hoveredPreviewTargetNodeId && previewTargetNodeId === hoveredPreviewTargetNodeId
-          ? zoomWidth + 2.8
-          : Math.max(2, zoomWidth - 0.55);
-        drawMovingTransportLine(trimmedPreviewCoords, previewColor, previewWidth, 0);
       }
       const dimNonHoveredLines = Boolean(hoveredAttackKey);
       for (const attackFeature of currentAttackFeatures) {
@@ -2669,7 +2502,7 @@
     }
 
     async function handleNodeClick(event) {
-      if (HIDE_NODE_INFORMATION_TEST) {
+      if (HIDE_NODE_INFORMATION_TEST || spacePressed || linkDragState) {
         return;
       }
       const feature = event.features?.[0];
@@ -2678,17 +2511,12 @@
       const nodeId = String(props.id);
       if (!sessionToken) {
         inspectNode(feature);
-        showToast("Log in first, then click one of your green nodes to open its connect panel.", "error");
+        showToast("Log in first, then click one of your green nodes to link.", "error");
         return;
       }
-      if (selectedNodeId) {
-        if (selectedNodeId === nodeId) {
-          clearSelection(`Cleared node ${nodeId}. Click one of your nodes to pick a sender.`);
-          inspectNode(feature);
-          return;
-        }
+      if (selectedNodeId === nodeId) {
+        clearSelection(`Cleared node ${nodeId}.`);
         inspectNode(feature);
-        void toggleConnectionToTargetNode(nodeId, feature);
         return;
       }
       if (props.ownerState === "self") {
@@ -2696,6 +2524,22 @@
         return;
       }
       inspectNode(feature);
+    }
+
+    function handleNodeMouseDown(event) {
+      if (!spacePressed || linkDragState) {
+        return;
+      }
+      const feature = event.features?.[0];
+      if (!feature) {
+        return;
+      }
+      if (String(feature.properties?.ownerState || "") !== "self") {
+        return;
+      }
+      if (startLinkDrag(feature, event.point)) {
+        event.preventDefault();
+      }
     }
 
     async function refreshBuildProgress() {
@@ -2712,14 +2556,6 @@
       if (refreshedSelection && refreshedSelection.properties?.ownerState === "self") {
         selectedNodeFeature = refreshedSelection;
         selectedNodeTextEl.textContent = selectedNodeSummary(refreshedSelection);
-        if (connectPreviewMode && previewTargetNodeId) {
-          const refreshedTarget = features.find((feature) => String(feature.properties?.id || "") === previewTargetNodeId) || null;
-          if (refreshedTarget && connectableNodeIds.has(previewTargetNodeId)) {
-            void setPreviewTarget(refreshedTarget);
-          } else {
-            clearPreviewLine();
-          }
-        }
       } else if (selectedNodeFeature && refreshedSelection && refreshedSelection.properties?.ownerState !== "self") {
         clearSelection("Selected node is no longer yours.");
       }
@@ -2758,11 +2594,7 @@
       map.getSource("game-nodes").setData({ type: "FeatureCollection", features: displayFeatures });
       renderedNodeCountEl.textContent = displayFeatures.length.toLocaleString();
       renderMinimap();
-      if (selectedNodeFeature && sessionToken && connectPreviewMode) {
-        if (!connectableNodeIds.size) {
-          scheduleConnectableTargetsRefresh(80);
-        }
-      } else {
+      if (!selectedNodeFeature) {
         clearConnectableTargets();
       }
       invalidateAttackCaches();
@@ -2780,7 +2612,6 @@
         map.getSource("game-nodes").setData(emptyFeatureCollection());
         updateClickedNodeHighlight(null);
         clearConnectableTargets();
-        clearPreviewLine();
         renderedNodeCountEl.textContent = "0";
         setStatus(ZOOM_IN_MESSAGE);
         return;
@@ -2837,7 +2668,7 @@
             return cachedPayload;
           }
         }
-        const payload = await fetchJson(`${NODE_TILE_URL}?z=${z}&x=${x}&y=${y}${suffix}`, {
+        const payload = await fetchJson(`${NODE_TILE_URL}?v=2&z=${z}&x=${x}&y=${y}${suffix}`, {
           cache: "no-store",
           signal: requestAbortController.signal,
         });
@@ -3014,11 +2845,8 @@
         lastOwnedFeatures = [];
         selectedNodeId = null;
         selectedNodeFeature = null;
-        connectPreviewMode = false;
         setAttackFeatures([]);
-        previewPathCache.clear();
         clearConnectableTargets();
-        clearPreviewLine();
         localStorage.removeItem(SESSION_KEY);
         authSummaryEl.textContent = error.message;
         showMainPanel(true);
@@ -3101,24 +2929,6 @@
     updateRouteRateButton.addEventListener("click", () => {
       void updateSelectedRouteRate();
     });
-    armConnectButton.addEventListener("click", () => {
-      armSelectedNodeConnection();
-    });
-    spaceConnectButton.addEventListener("click", () => {
-      armSelectedNodeConnection();
-    });
-    armConnectButton.addEventListener("mouseenter", () => {
-      updateHoveredNodeHighlight(selectedNodeFeature);
-    });
-    armConnectButton.addEventListener("mouseleave", () => {
-      updateHoveredNodeHighlight(null);
-    });
-    spaceConnectButton.addEventListener("mouseenter", () => {
-      updateHoveredNodeHighlight(selectedNodeFeature);
-    });
-    spaceConnectButton.addEventListener("mouseleave", () => {
-      updateHoveredNodeHighlight(null);
-    });
     nodeRoutesListEl.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-from-node-id][data-to-node-id]");
       if (!button) {
@@ -3133,13 +2943,6 @@
       const input = nodeRoutesListEl.querySelector(`input[data-from-node-id="${fromNodeId}"][data-to-node-id="${toNodeId}"]`);
       const sendPerTick = normalizeSendPerTick(input?.value || DEFAULT_SEND_PER_TICK);
       void updateAttackRate(fromNodeId, toNodeId, sendPerTick);
-    });
-    connectionTargetsListEl.addEventListener("click", (event) => {
-      const button = event.target.closest("button[data-target-node-id]");
-      if (!button) {
-        return;
-      }
-      void toggleConnectionToTargetNode(button.dataset.targetNodeId || "");
     });
     locateNodesButton.addEventListener("click", () => {
       if (!lastOwnedFeatures.length) {
@@ -3160,8 +2963,6 @@
       authSummaryEl.textContent = "Register or log in to claim 10 starting nodes.";
       selectedNodeId = null;
       selectedNodeFeature = null;
-      connectPreviewMode = false;
-      previewPathCache.clear();
       selectedNodeTextEl.textContent = "None";
       inspectedNodeId = null;
       clearSelectedNodeTargets();
@@ -3169,7 +2970,6 @@
       clearConnectableTargets();
       map.getSource("game-nodes")?.setData(emptyFeatureCollection());
       setAttackFeatures([]);
-      map.getSource("attack-preview")?.setData(emptyFeatureCollection());
       setStatus(defaultStatusMessage());
       showToast("Logged out.", "info");
       chosenColorConfirmed = false;
@@ -3188,12 +2988,38 @@
       if (targetTag === "INPUT" || targetTag === "TEXTAREA") {
         return;
       }
-      if (event.code === "Space") {
+      if (event.code === "Space" && !spacePressed) {
         event.preventDefault();
-        armSelectedNodeConnection();
+        spacePressed = true;
+        updateLinkDragPanState();
       } else if (event.code === "Escape") {
-        clearSelection(defaultStatusMessage());
+        if (linkDragState) {
+          cancelLinkDrag();
+        } else {
+          clearSelection(defaultStatusMessage());
+        }
       }
+    });
+    window.addEventListener("keyup", (event) => {
+      if (event.code === "Space") {
+        spacePressed = false;
+        if (linkDragState) {
+          cancelLinkDrag();
+        }
+        updateLinkDragPanState();
+      }
+    });
+    window.addEventListener("mousemove", (event) => {
+      if (!linkDragState) {
+        return;
+      }
+      updateLinkDragCursor(mouseEventToMapPoint(event));
+    });
+    window.addEventListener("mouseup", (event) => {
+      if (!linkDragState) {
+        return;
+      }
+      finishLinkDrag(mouseEventToMapPoint(event));
     });
     window.addEventListener("online", () => {
       nextBuildPollDelayMs = BUILD_POLL_MS;
@@ -3223,7 +3049,6 @@
       map.addSource("connectable-nodes", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("selected-node", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("hover-node", { type: "geojson", data: emptyFeatureCollection() });
-      map.addSource("attack-preview", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("attack-lines", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("attack-flow-arrows", { type: "geojson", data: emptyFeatureCollection() });
 
@@ -3234,23 +3059,23 @@
       map.addLayer({ id: "query-blocks-fill", type: "fill", source: "query-blocks", paint: { "fill-color": "#22c55e", "fill-opacity": ["case", ["boolean", ["get", "completed"], false], 0.25, 0.0] }, maxzoom: 10 });
       map.addLayer({ id: "query-blocks-line", type: "line", source: "query-blocks", paint: { "line-color": "#16a34a", "line-width": ["case", ["boolean", ["get", "completed"], false], 1.1, 0.0] }, maxzoom: 10 });
       map.addLayer({ id: "connectable-node-rings", type: "circle", source: "connectable-nodes", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 12, 13, 15, 16, 18], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "rgba(0,0,0,0)", "circle-stroke-width": 0, "circle-opacity": 0 } });
-      map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["get", "ownerColor"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#000000", "circle-stroke-width": 1.5, "circle-opacity": 0.96 } });
+      map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#000000", "circle-stroke-width": 1.5, "circle-opacity": 0.96 } });
       map.addLayer({ id: "self-node-ring", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["==", ["get", "ownerState"], "self"], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 13, 13, 17, 16, 21], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#22c55e", "circle-stroke-width": 2.2, "circle-opacity": 0.85 } });
       map.addLayer({ id: "selected-node-ring", type: "circle", source: "selected-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 16, 13, 20, 16, 25], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#facc15", "circle-stroke-width": 3.2, "circle-opacity": 1 } });
       map.addLayer({ id: "hover-node-ring", type: "circle", source: "hover-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 15.5, 13, 19.5, 16, 24], "circle-color": "rgba(250, 204, 21, 0.18)", "circle-stroke-color": "#facc15", "circle-stroke-width": 4.2, "circle-opacity": 1 } });
-      map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: 12, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9.5, 13, 11, 16, 13], "text-allow-overlap": true, "text-ignore-placement": true, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": "#000000", "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1.2 } });
+      map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 8, 13, 11, 16, 13], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": true, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": "#000000", "text-halo-color": "rgba(255,255,255,0.92)", "text-halo-width": 1.4 } });
 
       map.on("click", "connectable-node-rings", handleNodeClick);
       map.on("click", "game-node-circles", handleNodeClick);
       map.on("click", "game-node-labels", handleNodeClick);
+      map.on("mousedown", "connectable-node-rings", handleNodeMouseDown);
+      map.on("mousedown", "game-node-circles", handleNodeMouseDown);
+      map.on("mousedown", "game-node-labels", handleNodeMouseDown);
       map.on("mouseenter", "connectable-node-rings", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mousemove", "connectable-node-rings", handleNodeHoverPreview);
       map.on("mouseleave", "connectable-node-rings", handleNodeLeave);
       map.on("mouseenter", "game-node-circles", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mousemove", "game-node-circles", handleNodeHoverPreview);
       map.on("mouseleave", "game-node-circles", handleNodeLeave);
       map.on("mouseenter", "game-node-labels", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mousemove", "game-node-labels", handleNodeHoverPreview);
       map.on("mouseleave", "game-node-labels", handleNodeLeave);
       map.on("click", (event) => {
         const hitFeatures = map.queryRenderedFeatures(event.point, {
@@ -3263,6 +3088,8 @@
         updateNodeInfo(null);
       });
       map.on("moveend", () => { scheduleVisibleTileRefresh(); });
+      map.on("error", (event) => { console.error("MapLibre error:", event.error); });
+      map.on("style.loadError", (event) => { console.error("MapLibre style error:", event.error); });
 
       installButtonPressEffects();
       loadLoginFormState();
