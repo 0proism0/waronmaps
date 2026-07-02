@@ -993,6 +993,20 @@ impl App {
                 }
             }
         }
+
+        // Remove every outgoing attack from a node whose army has been drained
+        // to 0. Incoming attacks are intentionally kept so the node can still
+        // receive reinforcements while it rebuilds.
+        let depleted_nodes: HashSet<String> = data
+            .state
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.army <= 0)
+            .map(|(node_id, _)| node_id.clone())
+            .collect();
+        data.state
+            .attacks
+            .retain(|_, attack| !depleted_nodes.contains(&attack.from_node_id));
         Ok(())
     }
 
