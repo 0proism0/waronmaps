@@ -196,11 +196,11 @@
       <div class="stat"><span>Node</span><strong id="nodeInfoId">None</strong></div>
       <div class="stat"><span>Owner</span><strong id="nodeInfoOwner">No node selected</strong></div>
       <div class="stat"><span>Army</span><strong id="nodeInfoArmy">0</strong></div>
-      <div class="stat"><span>Net per 3s tick</span><strong id="nodeInfoDelta">0</strong></div>
+      <div class="stat"><span>Net per 1s tick</span><strong id="nodeInfoDelta">0</strong></div>
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
     <div class="route-controls">
-      <label for="sendPerTickInput">New connection army per 3s tick</label>
+      <label for="sendPerTickInput">New connection army per 1s tick</label>
       <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
       <div id="routeInfoHint" class="hint">Hold Space and drag from one of your nodes to an adjacent node to link.</div>
       <div class="actions">
@@ -276,10 +276,10 @@
     const TUTORIAL_KEY = "node-game-tutorial-v1";
     const MINIMAP_KEY = "node-game-minimap-v2";
     const BUILD_POLL_MS = 3000;
-    const GAME_POLL_MS = 5500;
+    const GAME_POLL_MS = 2000;
     const NETWORK_RETRY_MS = 10 * 60 * 1000;
     const FETCH_TIMEOUT_MS = 30000;
-    const WORLD_TICK_SECONDS = 3;
+    const WORLD_TICK_SECONDS = 1;
     const DASH_LEN = 8;
     const GAP_LEN = 10;
     const DASH_CYCLE_LEN = DASH_LEN + GAP_LEN;
@@ -368,7 +368,7 @@
     let nextBuildPollDelayMs = BUILD_POLL_MS;
     let nextGamePollDelayMs = GAME_POLL_MS;
     let lastWorldUpdateRefreshAt = 0;
-    const WORLD_UPDATE_THROTTLE_MS = 2500;
+    const WORLD_UPDATE_THROTTLE_MS = 2000;
     let visibleTileRefreshTimer = null;
     let activeVisibleTileAbortController = null;
     let lastVisibleTileRefreshStartedAt = 0;

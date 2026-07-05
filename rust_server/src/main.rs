@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use url::form_urlencoded;
 
-const WORLD_TICK_MS: u64 = 2500;
+const WORLD_TICK_MS: u64 = 1000;
 const REPO_REFRESH_MS: i64 = 10_000;
 const ARMY_CAP: i64 = 1_000_000;
 const PLAYER_COLORS: &[&str] = &[
