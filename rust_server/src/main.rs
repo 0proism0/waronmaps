@@ -46,7 +46,7 @@ fn normalize_player_color(color: Option<&str>) -> String {
     random_player_color()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct BBox {
     west: f64,
     east: f64,
@@ -354,6 +354,47 @@ impl App {
         };
         if features.is_empty() {
             features = fallback_boundary_features(&region);
+        }
+
+        // Also include rectangular query bounds from the manifest so that nodes
+        // fetched for the active region (which may extend slightly beyond the
+        // state boundary polygons) are retained.
+        if let Some(bounds) = region.get("query_bounds").and_then(Value::as_array) {
+            for bound in bounds {
+                if let Some((west, south, east, north, id)) = bound
+                    .get("west")
+                    .and_then(Value::as_f64)
+                    .zip(bound.get("south").and_then(Value::as_f64))
+                    .zip(bound.get("east").and_then(Value::as_f64))
+                    .zip(bound.get("north").and_then(Value::as_f64))
+                    .map(|(((w, s), e), n)| (w, s, e, n))
+                    .zip(
+                        bound
+                            .get("id")
+                            .and_then(value_to_string)
+                            .or_else(|| bound.get("name").and_then(value_to_string))
+                            .or_else(|| Some("query_bound".to_string())),
+                    )
+                    .map(|((w, s, e, n), id)| (w, s, e, n, id))
+                {
+                    let coordinates = json!([[
+                        [west, south],
+                        [east, south],
+                        [east, north],
+                        [west, north],
+                        [west, south]
+                    ]]);
+                    let mut properties = Map::new();
+                    properties.insert("name".to_string(), Value::String(id));
+                    features.push(GenericFeature {
+                        properties,
+                        geometry: GeometryValue {
+                            type_name: "Polygon".to_string(),
+                            coordinates,
+                        },
+                    });
+                }
+            }
         }
 
         data.boundary_repo.features = features
@@ -916,15 +957,8 @@ impl App {
 
     fn step_world_locked(&self, data: &mut AppData) -> Result<(), String> {
         self.sync_world_nodes_locked(data)?;
-        let owned_node_ids = data
-            .state
-            .nodes
-            .iter()
-            .filter(|(_, node)| node.owner_id.is_some())
-            .map(|(node_id, _)| node_id.clone())
-            .collect::<Vec<_>>();
-        for node_id in owned_node_ids {
-            if let Some(node) = data.state.nodes.get_mut(&node_id) {
+        for node in data.state.nodes.values_mut() {
+            if node.owner_id.is_some() {
                 node.army = (node.army + 1).min(ARMY_CAP);
             }
         }
@@ -2012,8 +2046,8 @@ fn s2_cover_recursive(cell: CellID, level: u64, rect: &S2Rect, cover: &mut Vec<C
     if !s2_cell_intersects_rect(&cell, rect) {
         return;
     }
-    if cell.level() == level || s2_cell_contained_in_rect(&cell, rect) {
-        cover.push(cell.parent(level));
+    if cell.level() == level {
+        cover.push(cell);
         return;
     }
     for child in cell.children() {
@@ -2024,11 +2058,6 @@ fn s2_cover_recursive(cell: CellID, level: u64, rect: &S2Rect, cover: &mut Vec<C
 fn s2_cell_intersects_rect(cell: &CellID, rect: &S2Rect) -> bool {
     let bound = s2_cell_rect(cell);
     bound.intersects(rect)
-}
-
-fn s2_cell_contained_in_rect(cell: &CellID, rect: &S2Rect) -> bool {
-    let bound = s2_cell_rect(cell);
-    rect.contains(&bound)
 }
 
 fn s2_cell_rect(cell: &CellID) -> S2Rect {
@@ -2077,6 +2106,7 @@ async fn handle_ws_client(
     app: Arc<App>,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<String>,
 ) {
+    // eprintln!("DEBUG ws client connected");
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws_stream) => ws_stream,
         Err(err) => {
@@ -2111,8 +2141,9 @@ async fn handle_ws_client(
     })
     .await;
 
-    let player_id = match auth_result {
+    let _player_id = match auth_result {
         Ok(Some(pid)) => {
+            // eprintln!("DEBUG ws auth ok player={pid}");
             let response = json!({
                 "type": "authResult",
                 "success": true,
@@ -2122,7 +2153,18 @@ async fn handle_ws_client(
             let _ = ws_tx.send(tokio_tungstenite::tungstenite::Message::Text(response)).await;
             pid
         }
-        _ => {
+        Ok(None) => {
+            // eprintln!("DEBUG ws auth no player");
+            let response = json!({
+                "type": "authResult",
+                "success": false
+            })
+            .to_string();
+            let _ = ws_tx.send(tokio_tungstenite::tungstenite::Message::Text(response)).await;
+            return;
+        }
+        Err(_) => {
+            // eprintln!("DEBUG ws auth timeout");
             let response = json!({
                 "type": "authResult",
                 "success": false
@@ -2133,17 +2175,35 @@ async fn handle_ws_client(
         }
     };
 
-    while let Ok(msg) = broadcast_rx.recv().await {
-        if ws_tx
-            .send(tokio_tungstenite::tungstenite::Message::Text(msg))
-            .await
-            .is_err()
-        {
-            break;
+    let mut ping_interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            biased;
+            result = broadcast_rx.recv() => {
+                let msg = match result {
+                    Ok(msg) => msg,
+                    Err(_) => break,
+                };
+                if ws_tx
+                    .send(tokio_tungstenite::tungstenite::Message::Text(msg))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            _ = ping_interval.tick() => {
+                if ws_tx
+                    .send(tokio_tungstenite::tungstenite::Message::Ping(vec![]))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
         }
     }
-
-    let _ = player_id;
 }
 
 fn parse_body_json(request: &mut Request) -> Result<Value, String> {

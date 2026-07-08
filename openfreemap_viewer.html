@@ -288,7 +288,7 @@
     const NODE_DATA_MIN_ZOOM = 12;
     const NODE_DATA_MAX_ZOOM = 14;
     const MAX_VISIBLE_NODE_TILES = 16;
-    const VISIBLE_TILE_REFRESH_COOLDOWN_MS = 5000;
+    const VISIBLE_TILE_REFRESH_COOLDOWN_MS = 1000;
     const NODE_TILE_CACHE_TTL_MS = 5 * 60 * 1000;
     const ZOOM_IN_MESSAGE = "Please zoom in to see nodes.";
     const DEFAULT_SEND_PER_TICK = 1;
@@ -349,6 +349,9 @@
     let wsConnection = null;
     let wsConnected = false;
     let wsReconnectTimer = null;
+    let wsMessageCount = 0;
+    let lastWsMessageAt = 0;
+    let wsReconnectAttempts = 0;
     let sessionToken = localStorage.getItem(SESSION_KEY) || "";
     let selectedNodeId = null;
     let currentPlayerId = null;
@@ -2773,25 +2776,29 @@
       }
       try {
         wsConnection = new WebSocket(WS_URL);
-        wsConnection.onopen = () => {
+        wsConnection.addEventListener("open", () => {
+          wsReconnectAttempts = 0;
           wsConnection.send(JSON.stringify({ type: "auth", token: sessionToken }));
-        };
-        wsConnection.onmessage = (event) => {
+        });
+        wsConnection.addEventListener("message", (event) => {
+          wsMessageCount += 1;
+          lastWsMessageAt = Date.now();
           try {
             const message = JSON.parse(event.data);
             handleWsMessage(message);
           } catch (error) {
             console.warn("Failed to parse WebSocket message:", event.data, error);
           }
-        };
-        wsConnection.onclose = () => {
+        });
+        wsConnection.addEventListener("close", () => {
           wsConnected = false;
           wsConnection = null;
+          wsReconnectAttempts += 1;
           scheduleWsReconnect();
-        };
-        wsConnection.onerror = (error) => {
+        });
+        wsConnection.addEventListener("error", (error) => {
           console.warn("WebSocket error:", error);
-        };
+        });
       } catch (error) {
         console.warn("Failed to open WebSocket:", error);
       }
@@ -2815,10 +2822,11 @@
       if (wsReconnectTimer || !sessionToken) {
         return;
       }
+      const delay = Math.min(GAME_POLL_MS * (1 + wsReconnectAttempts), 30000);
       wsReconnectTimer = window.setTimeout(() => {
         wsReconnectTimer = null;
         connectWebSocket();
-      }, GAME_POLL_MS);
+      }, delay);
     }
 
     function handleWsMessage(message) {
@@ -2833,7 +2841,7 @@
           lastWorldUpdateRefreshAt = now;
           void refreshGameState();
           clearNodeTileResponseCache();
-          scheduleVisibleTileRefresh(500, false);
+          scheduleVisibleTileRefresh(100, false);
         }
       }
     }
@@ -2907,10 +2915,10 @@
 
     async function gamePollLoop() {
       try {
-        if (!wsConnected) {
-          await refreshGameState();
-        }
-        nextGamePollDelayMs = wsConnected ? 30_000 : GAME_POLL_MS;
+        await refreshGameState();
+        clearNodeTileResponseCache();
+        scheduleVisibleTileRefresh(100, false);
+        nextGamePollDelayMs = GAME_POLL_MS;
       } catch (error) {
         nextGamePollDelayMs = error.retryable ? (error.retryAfterMs || NETWORK_RETRY_MS) : GAME_POLL_MS;
         setStatus(`Game polling failed: ${error.message}. Retrying in ${formatRetryDelay(nextGamePollDelayMs)}.`);
@@ -3126,7 +3134,7 @@
         inspectedNodeId = null;
         updateNodeInfo(null);
       });
-      map.on("moveend", () => { scheduleVisibleTileRefresh(); });
+      map.on("moveend", () => { scheduleVisibleTileRefresh(0, true); });
       map.on("error", (event) => { console.error("MapLibre error:", event.error); });
       map.on("style.loadError", (event) => { console.error("MapLibre style error:", event.error); });
 
