@@ -18,6 +18,7 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use url::form_urlencoded;
 
 const WORLD_TICK_MS: u64 = 1000;
+const MAX_CATCH_UP_TICKS: usize = 60; // Avoid freezing after the server has been offline for a while.
 const REPO_REFRESH_MS: i64 = 10_000;
 const ARMY_CAP: i64 = 1_000_000;
 const PLAYER_COLORS: &[&str] = &[
@@ -167,6 +168,8 @@ struct GameState {
     version: i64,
     saved_at: i64,
     #[serde(default)]
+    last_persisted_at: i64,
+    #[serde(default)]
     players: HashMap<String, Player>,
     #[serde(default)]
     usernames: HashMap<String, String>,
@@ -183,6 +186,7 @@ impl GameState {
         Self {
             version: 1,
             saved_at: now_ms(),
+            last_persisted_at: now_ms(),
             players: HashMap::new(),
             usernames: HashMap::new(),
             sessions: HashMap::new(),
@@ -292,7 +296,9 @@ impl App {
     }
 
     fn save_state_locked(&self, state: &mut GameState) -> Result<(), String> {
-        state.saved_at = now_ms();
+        let now = now_ms();
+        state.saved_at = now;
+        state.last_persisted_at = now;
         write_json_file(&self.state_path, state)
     }
 
@@ -1065,14 +1071,22 @@ impl App {
             current
         };
         let elapsed_ticks = ((current - last).max(0) / WORLD_TICK_MS as i64) as usize;
+        let elapsed_ticks = elapsed_ticks.min(MAX_CATCH_UP_TICKS);
         if elapsed_ticks == 0 {
-            self.sync_world_nodes_locked(data)?;
+            // Nothing to simulate. The background ticker keeps world nodes in sync,
+            // so read-only requests do not need to pay for a full sync scan.
             return Ok(());
         }
         for _ in 0..elapsed_ticks {
             self.step_world_locked(data)?;
         }
-        self.save_state_locked(&mut data.state)?;
+        data.state.saved_at = current;
+        // Avoid serializing the entire world to disk every single second.
+        // The background ticker only persists every 5 seconds; mutating
+        // endpoints still call save_state_locked directly when they change state.
+        if current - data.state.last_persisted_at >= 5000 {
+            self.save_state_locked(&mut data.state)?;
+        }
         Ok(())
     }
 
@@ -1356,12 +1370,12 @@ impl App {
     }
 
     fn game_state_response(&self, token: Option<&str>, include_nodes: bool) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let data = self.inner.lock().unwrap();
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
-        self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
+        // The background ticker advances the world, so read-only responses
+        // do not need to pay for a full lock-held tick.
         let player_id = session.as_ref().map(|session| session.player_id.as_str());
         let owned_nodes = self.owned_node_features_locked(&data, player_id);
         let node_features = if include_nodes {
@@ -1419,12 +1433,10 @@ impl App {
     }
 
     fn leaderboard_response(&self, token: Option<&str>) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let data = self.inner.lock().unwrap();
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
-        self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         let mut scores = HashMap::<String, (usize, i64)>::new();
         for node in data.state.nodes.values() {
             if let Some(owner_id) = node.owner_id.as_ref() {
@@ -1528,8 +1540,6 @@ impl App {
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
-        self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         let player_id = session.as_ref().map(|session| session.player_id.as_str());
         let node_ids = self.node_ids_for_tile_locked(&mut data, z, x, y)?;
         let features = node_ids
@@ -1555,8 +1565,6 @@ impl App {
     ) -> Result<Value, String> {
         let mut data = self.inner.lock().unwrap();
         let session = self.require_session_locked(&data, token)?;
-        self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         if candidate_node_ids.len() > 20_000 {
             return Err("Too many candidate nodes requested.".to_string());
         }
@@ -1609,7 +1617,6 @@ impl App {
         let mut data = self.inner.lock().unwrap();
         let session = self.require_session_locked(&data, token)?;
         self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         let matching_ids = data
             .state
             .attacks
@@ -1646,8 +1653,6 @@ impl App {
     ) -> Result<Value, String> {
         let mut data = self.inner.lock().unwrap();
         let session = self.require_session_locked(&data, token)?;
-        self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         let (mode, path, owner_state) =
             self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
         Ok(json!({
@@ -1670,7 +1675,6 @@ impl App {
         let mut data = self.inner.lock().unwrap();
         let session = self.require_session_locked(&data, token)?;
         self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         let existing_attack_id = data
             .state
             .attacks
@@ -1726,7 +1730,6 @@ impl App {
         let mut data = self.inner.lock().unwrap();
         let session = self.require_session_locked(&data, token)?;
         self.tick_world_locked(&mut data)?;
-        self.sync_world_nodes_locked(&mut data)?;
         let next_rate = sanitize_send_per_tick(send_per_tick);
         let attack = data
             .state
@@ -2103,7 +2106,7 @@ fn run_websocket_server(app: Arc<App>, update_rx: crossbeam_channel::Receiver<St
             }
         });
 
-        let addr = format!("127.0.0.1:{port}");
+        let addr = format!("0.0.0.0:{port}");
         let listener = match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => listener,
             Err(err) => {
@@ -2306,8 +2309,8 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 let body = parse_body_json(&mut request)?;
                 let username = body.get("username").and_then(Value::as_str).unwrap_or_default();
                 let password = body.get("password").and_then(Value::as_str).unwrap_or_default();
-                let color = body.get("color").and_then(Value::as_str);
-                Ok(json_response(200, &app.register_player(username, password, color)?))
+                // The server assigns a random color automatically.
+                Ok(json_response(200, &app.register_player(username, password, None)?))
             }
             (&Method::Post, "/api/login") => {
                 let body = parse_body_json(&mut request)?;
@@ -2481,10 +2484,10 @@ fn main() {
         .ok()
         .or_else(|| std::env::args().nth(1))
         .unwrap_or_else(|| "8002".to_string());
-    let address = format!("127.0.0.1:{port}");
+    let address = format!("0.0.0.0:{port}");
     let server = Server::http(&address).unwrap_or_else(|error| panic!("failed to bind {address}: {error}"));
-    println!("Game server listening on http://localhost:{port}");
-    println!("WebSocket server listening on ws://localhost:{ws_port}/ws");
+    println!("Game server listening on http://0.0.0.0:{port}");
+    println!("WebSocket server listening on ws://0.0.0.0:{ws_port}/ws");
 
     for request in server.incoming_requests() {
         let app = app.clone();
