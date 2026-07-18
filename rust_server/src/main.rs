@@ -21,6 +21,24 @@ const WORLD_TICK_MS: u64 = 1000;
 const MAX_CATCH_UP_TICKS: usize = 60; // Avoid freezing after the server has been offline for a while.
 const REPO_REFRESH_MS: i64 = 10_000;
 const ARMY_CAP: i64 = 1_000_000;
+const CITY_RADIUS_KM: f64 = 2.0;
+const BARRACKS_COST: i64 = 100_000;
+const CITY_COST: i64 = 100_000_000;
+const MARKET_COST: i64 = 100_000;
+const BANK_COST: i64 = 10_000_000;
+const HOSPITAL_COST: i64 = 100_000_000;
+const BAR_COST: i64 = 100_000;
+const SILO_COST: i64 = 10_000_000;
+const SAM_COST: i64 = 50_000_000;
+const MISSILE_SMALL_COST: i64 = 10_000_000;
+const MISSILE_SMALL_RADIUS_KM: f64 = 0.3;
+const MISSILE_NUKE_COST: i64 = 100_000_000;
+const MISSILE_NUKE_RADIUS_KM: f64 = 1.0;
+const MISSILE_HYDROGEN_COST: i64 = 1_000_000_000;
+const MISSILE_HYDROGEN_RADIUS_KM: f64 = 3.0;
+const SILO_COOLDOWN_MS: i64 = 10 * 60 * 1000;
+const SAM_COOLDOWN_MS: i64 = 12 * 60 * 1000;
+const SAM_RADIUS_KM: f64 = 5.0;
 const PLAYER_COLORS: &[&str] = &[
     "#c81c1c", "#c8391c", "#c8561c", "#c8721c", "#c88f1c", "#c8ac1c", "#c8c81c", "#acc81c",
     "#8fc81c", "#72c81c", "#56c81c", "#39c81c", "#1cc81c", "#1cc839", "#1cc856", "#1cc872",
@@ -121,6 +139,48 @@ struct NodeRepo {
     display_names: HashMap<String, String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+enum BuildingType {
+    Barracks,
+    City,
+    Market,
+    Bank,
+    Hospital,
+    Bar,
+    Silo,
+    Sam,
+}
+
+impl BuildingType {
+    fn from_str(value: &str) -> Option<Self> {
+        match value.to_lowercase().as_str() {
+            "barracks" => Some(BuildingType::Barracks),
+            "city" => Some(BuildingType::City),
+            "market" => Some(BuildingType::Market),
+            "bank" => Some(BuildingType::Bank),
+            "hospital" => Some(BuildingType::Hospital),
+            "bar" => Some(BuildingType::Bar),
+            "silo" => Some(BuildingType::Silo),
+            "sam" => Some(BuildingType::Sam),
+            _ => None,
+        }
+    }
+
+    fn to_label(&self) -> &'static str {
+        match self {
+            BuildingType::Barracks => "Barracks",
+            BuildingType::City => "City",
+            BuildingType::Market => "Market",
+            BuildingType::Bank => "Bank",
+            BuildingType::Hospital => "Hospital",
+            BuildingType::Bar => "Bar",
+            BuildingType::Silo => "Silo",
+            BuildingType::Sam => "SAM",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Player {
@@ -131,6 +191,20 @@ struct Player {
     start_node_ids: Vec<String>,
     #[serde(default = "random_player_color")]
     color: String,
+    #[serde(default)]
+    gold: i64,
+    #[serde(default)]
+    gold_income_per_sec: i64,
+    #[serde(default)]
+    gold_updated_at: i64,
+    #[serde(default)]
+    damage_reduction_percent: i64,
+    #[serde(default)]
+    happiness_percent: i64,
+    #[serde(default)]
+    last_silo_fire_at: i64,
+    #[serde(default)]
+    last_sam_fire_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -146,6 +220,8 @@ struct Session {
 struct WorldNode {
     owner_id: Option<String>,
     army: i64,
+    #[serde(default)]
+    building: Option<BuildingType>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -713,6 +789,7 @@ impl App {
                     WorldNode {
                         owner_id: None,
                         army: 10,
+                        building: None,
                     },
                 );
                 modified = true;
@@ -827,6 +904,447 @@ impl App {
             .collect();
         scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         Ok(scored.into_iter().take(10).map(|item| item.0).collect())
+    }
+
+    fn update_player_gold_locked(&self, data: &mut AppData, player_id: &str) {
+        let now = now_ms();
+        if let Some(player) = data.state.players.get_mut(player_id) {
+            let elapsed_ms = (now - player.gold_updated_at).max(0);
+            // Cap catch-up to one hour so an offline gap does not overflow.
+            let elapsed_secs = (elapsed_ms / 1000).min(60 * 60);
+            if elapsed_secs > 0 {
+                player.gold = player
+                    .gold
+                    .saturating_add(player.gold_income_per_sec.saturating_mul(elapsed_secs));
+                player.gold_updated_at = now;
+            }
+        }
+    }
+
+    fn player_city_node_ids_locked(&self, data: &AppData, player_id: &str) -> HashSet<String> {
+        let city_coords: Vec<Coord> = data
+            .state
+            .nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.owner_id.as_deref() == Some(player_id)
+                    && node.building == Some(BuildingType::City)
+            })
+            .filter_map(|(id, _)| data.node_repo.coords_by_id.get(id).cloned())
+            .collect();
+        if city_coords.is_empty() {
+            return HashSet::new();
+        }
+        data.node_repo
+            .nodes_by_id
+            .values()
+            .filter_map(|node| {
+                for city_coord in &city_coords {
+                    if haversine_km(node.lat, node.lon, city_coord.lat, city_coord.lon)
+                        <= CITY_RADIUS_KM
+                    {
+                        return Some(node.id.clone());
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    fn is_node_inside_player_city_locked(
+        &self,
+        data: &AppData,
+        node_id: &str,
+        player_id: &str,
+    ) -> bool {
+        let coord = match data.node_repo.coords_by_id.get(node_id) {
+            Some(c) => c,
+            None => return false,
+        };
+        data.state.nodes.iter().any(|(city_id, city_node)| {
+            city_node.owner_id.as_deref() == Some(player_id)
+                && city_node.building == Some(BuildingType::City)
+                && data
+                    .node_repo
+                    .coords_by_id
+                    .get(city_id)
+                    .map(|city_coord| {
+                        haversine_km(coord.lat, coord.lon, city_coord.lat, city_coord.lon)
+                            <= CITY_RADIUS_KM
+                    })
+                    .unwrap_or(false)
+        })
+    }
+
+    fn nearest_own_city_id_locked(
+        &self,
+        data: &AppData,
+        player_id: &str,
+        node_id: &str,
+    ) -> Option<String> {
+        let coord = data.node_repo.coords_by_id.get(node_id)?;
+        let mut best: Option<(String, f64)> = None;
+        for (city_id, city_node) in data.state.nodes.iter() {
+            if city_node.owner_id.as_deref() == Some(player_id)
+                && city_node.building == Some(BuildingType::City)
+            {
+                let city_coord = data.node_repo.coords_by_id.get(city_id)?;
+                let dist = haversine_km(coord.lat, coord.lon, city_coord.lat, city_coord.lon);
+                if dist <= CITY_RADIUS_KM
+                    && best.as_ref().map(|(_, d)| dist < *d).unwrap_or(true)
+                {
+                    best = Some((city_id.clone(), dist));
+                }
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+
+    fn recompute_player_economy_locked(&self, data: &mut AppData, player_id: &str) {
+        self.update_player_gold_locked(data, player_id);
+        let city_nodes = self.player_city_node_ids_locked(data, player_id);
+        let owned_count = data
+            .state
+            .nodes
+            .values()
+            .filter(|node| node.owner_id.as_deref() == Some(player_id))
+            .count() as i64;
+        let mut income = owned_count; // 1 gold per node per second
+        let mut hospitals = 0_i64;
+        let mut bars = 0_i64;
+        let mut markets = 0_i64;
+        let mut bank_cities = HashSet::<String>::new();
+        for (node_id, node) in data.state.nodes.iter() {
+            if node.owner_id.as_deref() != Some(player_id) {
+                continue;
+            }
+            let Some(building) = &node.building else { continue };
+            let in_city = city_nodes.contains(node_id);
+            match building {
+                BuildingType::Market => {
+                    let base = 20 + 10 * markets;
+                    income += if in_city { (base * 15) / 10 } else { base };
+                    markets += 1;
+                }
+                BuildingType::Bank => {
+                    if in_city {
+                        if let Some(city_id) = self.nearest_own_city_id_locked(data, player_id, node_id) {
+                            if bank_cities.insert(city_id) {
+                                income += (300 * 15) / 10;
+                            }
+                        }
+                    }
+                }
+                BuildingType::Hospital => hospitals += 1,
+                BuildingType::Bar => bars += 1,
+                _ => {}
+            }
+        }
+        if let Some(player) = data.state.players.get_mut(player_id) {
+            player.gold_income_per_sec = income;
+            player.damage_reduction_percent = hospitals;
+            player.happiness_percent = bars;
+        }
+    }
+
+    fn building_cost(&self, building: &BuildingType) -> i64 {
+        match building {
+            BuildingType::Barracks => BARRACKS_COST,
+            BuildingType::City => CITY_COST,
+            BuildingType::Market => MARKET_COST,
+            BuildingType::Bank => BANK_COST,
+            BuildingType::Hospital => HOSPITAL_COST,
+            BuildingType::Bar => BAR_COST,
+            BuildingType::Silo => SILO_COST,
+            BuildingType::Sam => SAM_COST,
+        }
+    }
+
+    fn build_building_locked(
+        &self,
+        data: &mut AppData,
+        player_id: &str,
+        node_id: &str,
+        building: BuildingType,
+    ) -> Result<Value, String> {
+        self.sync_world_nodes_locked(data)?;
+        self.update_player_gold_locked(data, player_id);
+        let node = data
+            .state
+            .nodes
+            .get(node_id)
+            .cloned()
+            .ok_or_else(|| "Node does not exist.".to_string())?;
+        if node.owner_id.as_deref() != Some(player_id) {
+            return Err("You do not own this node.".to_string());
+        }
+        if node.building.is_some() {
+            return Err("This node already has a building.".to_string());
+        }
+        let cost = self.building_cost(&building);
+        let player = data
+            .state
+            .players
+            .get(player_id)
+            .ok_or_else(|| "Player not found.".to_string())?;
+        if player.gold < cost {
+            return Err(format!(
+                "Not enough gold. {} costs {} gold.",
+                building.to_label(),
+                cost
+            ));
+        }
+
+        // Requirement checks
+        match &building {
+            BuildingType::Market | BuildingType::Bank | BuildingType::Hospital | BuildingType::Bar => {
+                if !self.is_node_inside_player_city_locked(data, node_id, player_id) {
+                    return Err(format!(
+                        "{} must be built inside one of your cities.",
+                        building.to_label()
+                    ));
+                }
+            }
+            _ => {}
+        }
+        if building == BuildingType::Bank {
+            if let Some(city_id) = self.nearest_own_city_id_locked(data, player_id, node_id) {
+                let has_bank = data.state.nodes.iter().any(|(nid, n)| {
+                    n.owner_id.as_deref() == Some(player_id)
+                        && n.building == Some(BuildingType::Bank)
+                        && self.nearest_own_city_id_locked(data, player_id, nid).as_deref() == Some(city_id.as_str())
+                });
+                if has_bank {
+                    return Err("This city already has a bank.".to_string());
+                }
+            }
+        }
+
+        let player = data.state.players.get_mut(player_id).unwrap();
+        player.gold -= cost;
+        let building_label = building.to_label().to_string();
+        if let Some(node) = data.state.nodes.get_mut(node_id) {
+            node.building = Some(building);
+            node.army = 0;
+        }
+        self.recompute_player_economy_locked(data, player_id);
+        data.state.version += 1;
+        self.save_state_locked(&mut data.state)?;
+        Ok(json!({
+            "ok": true,
+            "nodeId": node_id,
+            "building": building_label,
+            "gold": data.state.players.get(player_id).map(|p| p.gold).unwrap_or(0),
+            "goldIncomePerSec": data.state.players.get(player_id).map(|p| p.gold_income_per_sec).unwrap_or(0)
+        }))
+    }
+
+    fn launch_missile_locked(
+        &self,
+        data: &mut AppData,
+        player_id: &str,
+        missile_type: &str,
+        target_lat: f64,
+        target_lon: f64,
+    ) -> Result<Value, String> {
+        self.sync_world_nodes_locked(data)?;
+        self.update_player_gold_locked(data, player_id);
+        let (cost, radius_km) = match missile_type.to_lowercase().as_str() {
+            "small" => (MISSILE_SMALL_COST, MISSILE_SMALL_RADIUS_KM),
+            "nuke" => (MISSILE_NUKE_COST, MISSILE_NUKE_RADIUS_KM),
+            "hydrogen" => (MISSILE_HYDROGEN_COST, MISSILE_HYDROGEN_RADIUS_KM),
+            _ => return Err("Unknown missile type.".to_string()),
+        };
+        let now = now_ms();
+        let has_silo = data.state.nodes.values().any(|node| {
+            node.owner_id.as_deref() == Some(player_id) && node.building == Some(BuildingType::Silo)
+        });
+        if !has_silo {
+            return Err("You need a Silo to launch missiles.".to_string());
+        }
+        let player = data.state.players.get(player_id).ok_or_else(|| "Player not found.".to_string())?;
+        if player.gold < cost {
+            return Err(format!("Not enough gold. This missile costs {} gold.", cost));
+        }
+        if now - player.last_silo_fire_at < SILO_COOLDOWN_MS {
+            return Err("Silo is on cooldown.".to_string());
+        }
+
+        // SAM interception: any enemy SAM within SAM_RADIUS_KM of the target can intercept.
+        let mut intercepted = false;
+        let mut interceptor_id: Option<String> = None;
+        let sam_owners: Vec<String> = data
+            .state
+            .players
+            .keys()
+            .filter(|id| *id != player_id)
+            .cloned()
+            .collect();
+        'outer: for owner_id in sam_owners {
+            for (sam_node_id, sam_node) in data.state.nodes.iter() {
+                if sam_node.owner_id.as_deref() != Some(owner_id.as_str())
+                    || sam_node.building != Some(BuildingType::Sam)
+                {
+                    continue;
+                }
+                let sam_coord = match data.node_repo.coords_by_id.get(sam_node_id) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                if haversine_km(target_lat, target_lon, sam_coord.lat, sam_coord.lon) > SAM_RADIUS_KM {
+                    continue;
+                }
+                let sam_player = match data.state.players.get(&owner_id) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                if now - sam_player.last_sam_fire_at < SAM_COOLDOWN_MS {
+                    continue;
+                }
+                intercepted = true;
+                interceptor_id = Some(owner_id.clone());
+                break 'outer;
+            }
+        }
+
+        if intercepted {
+            if let Some(interceptor_id) = &interceptor_id {
+                if let Some(player) = data.state.players.get_mut(interceptor_id) {
+                    player.last_sam_fire_at = now;
+                }
+            }
+            let player = data.state.players.get_mut(player_id).unwrap();
+            player.last_silo_fire_at = now;
+            player.gold -= cost;
+            data.state.version += 1;
+            self.save_state_locked(&mut data.state)?;
+            return Ok(json!({
+                "ok": true,
+                "intercepted": true,
+                "interceptorId": interceptor_id,
+                "targetLat": target_lat,
+                "targetLon": target_lon,
+                "radiusKm": radius_km,
+            }));
+        }
+
+        let mut affected = Vec::<String>::new();
+        for (node_id, node) in data.state.nodes.iter_mut() {
+            if node.owner_id.as_deref() == Some(player_id) {
+                continue;
+            }
+            if node.building.is_some() {
+                continue;
+            }
+            let coord = match data.node_repo.coords_by_id.get(node_id) {
+                Some(c) => c,
+                None => continue,
+            };
+            if haversine_km(target_lat, target_lon, coord.lat, coord.lon) <= radius_km {
+                node.army = 0;
+                node.owner_id = Some(player_id.to_string());
+                affected.push(node_id.clone());
+            }
+        }
+
+        let player = data.state.players.get_mut(player_id).unwrap();
+        player.last_silo_fire_at = now;
+        player.gold -= cost;
+        self.recompute_player_economy_locked(data, player_id);
+        data.state.version += 1;
+        self.save_state_locked(&mut data.state)?;
+        Ok(json!({
+            "ok": true,
+            "intercepted": false,
+            "missileType": missile_type,
+            "targetLat": target_lat,
+            "targetLon": target_lon,
+            "radiusKm": radius_km,
+            "affectedNodeIds": affected,
+            "affectedCount": affected.len(),
+        }))
+    }
+
+    fn build_building_request(
+        &self,
+        token: &str,
+        node_id: &str,
+        building: BuildingType,
+    ) -> Result<Value, String> {
+        let mut data = self.inner.lock().unwrap();
+        let session = self.require_session_locked(&data, token)?;
+        self.build_building_locked(&mut data, &session.player_id, node_id, building)
+    }
+
+    fn launch_missile_request(
+        &self,
+        token: &str,
+        missile_type: &str,
+        target_lat: f64,
+        target_lon: f64,
+    ) -> Result<Value, String> {
+        let mut data = self.inner.lock().unwrap();
+        let session = self.require_session_locked(&data, token)?;
+        self.launch_missile_locked(&mut data, &session.player_id, missile_type, target_lat, target_lon)
+    }
+
+    fn city_features_locked(&self, data: &AppData) -> Vec<Value> {
+        data.state
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                if node.building != Some(BuildingType::City) {
+                    return None;
+                }
+                let coord = data.node_repo.coords_by_id.get(node_id)?;
+                let owner = node.owner_id.as_ref().and_then(|pid| data.state.players.get(pid));
+                let color = owner.map(|p| p.color.clone()).unwrap_or_else(|| "#94a3b8".to_string());
+                Some(json!({
+                    "type": "Feature",
+                    "geometry": circle_polygon(coord.lat, coord.lon, CITY_RADIUS_KM),
+                    "properties": {
+                        "id": node_id,
+                        "ownerId": node.owner_id,
+                        "ownerColor": color,
+                    }
+                }))
+            })
+            .collect()
+    }
+
+    fn node_army_production_rate_locked(
+        &self,
+        data: &AppData,
+        node_id: &str,
+        player_id: &str,
+    ) -> f64 {
+        let mut rate = 1.0;
+        if data.node_repo.coords_by_id.get(node_id).is_none() {
+            return 0.0;
+        }
+        if let Some(neighbors) = data.node_repo.adjacency.get(node_id) {
+            for edge in neighbors {
+                let neighbor = match data.state.nodes.get(&edge.to) {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if neighbor.owner_id.as_deref() != Some(player_id) {
+                    continue;
+                }
+                if neighbor.building != Some(BuildingType::Barracks) {
+                    continue;
+                }
+                let mut bonus = 1.0;
+                if self.is_node_inside_player_city_locked(data, &edge.to, player_id) {
+                    bonus *= 1.5;
+                }
+                rate += bonus;
+            }
+        }
+        if self.is_node_inside_player_city_locked(data, node_id, player_id) {
+            rate *= 1.5;
+        }
+        rate
     }
 
     fn require_session_locked(&self, data: &AppData, token: &str) -> Result<Session, String> {
@@ -965,20 +1483,30 @@ impl App {
                 WorldNode {
                     owner_id: Some(player_id.clone()),
                     army: 10,
+                    building: None,
                 },
             );
         }
+        let now = now_ms();
         data.state.players.insert(
             player_id.clone(),
             Player {
                 id: player_id.clone(),
                 username: normalized.clone(),
                 password_hash: sha256_hex(password),
-                created_at: now_ms(),
+                created_at: now,
                 start_node_ids: start_nodes.clone(),
                 color: normalize_player_color(color),
+                gold: 0,
+                gold_income_per_sec: 0,
+                gold_updated_at: now,
+                damage_reduction_percent: 0,
+                happiness_percent: 0,
+                last_silo_fire_at: 0,
+                last_sam_fire_at: 0,
             },
         );
+        self.recompute_player_economy_locked(&mut data, &player_id);
         data.state.usernames.insert(normalized, player_id.clone());
         data.state.sessions.insert(
             session_token.clone(),
@@ -1025,9 +1553,40 @@ impl App {
 
     fn step_world_locked(&self, data: &mut AppData) -> Result<(), String> {
         self.sync_world_nodes_locked(data)?;
+
+        // Update lazy gold for every player and recompute their economies once per tick.
+        let player_ids: Vec<String> = data.state.players.keys().cloned().collect();
+        for player_id in &player_ids {
+            self.recompute_player_economy_locked(data, player_id);
+        }
+
+        // Building-aware army production.
+        let production_rates: HashMap<String, i64> = data
+            .state
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                let player_id = node.owner_id.as_deref()?;
+                if node.building.is_some() {
+                    return None;
+                }
+                let rate = self.node_army_production_rate_locked(data, node_id, player_id);
+                if rate > 0.0 {
+                    Some((node_id.clone(), rate as i64))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (node_id, rate) in production_rates {
+            if let Some(node) = data.state.nodes.get_mut(&node_id) {
+                node.army = (node.army + rate).min(ARMY_CAP);
+            }
+        }
+        // Ensure building nodes have 0 army.
         for node in data.state.nodes.values_mut() {
-            if node.owner_id.is_some() {
-                node.army = (node.army + 1).min(ARMY_CAP);
+            if node.building.is_some() {
+                node.army = 0;
             }
         }
 
@@ -1085,10 +1644,21 @@ impl App {
             }
 
             if let Some(target_node) = data.state.nodes.get_mut(&attack.to_node_id) {
-                target_node.army -= flow;
+                // Hospitals provide damage reduction against enemy attacks.
+                let mut effective_flow = flow as f64;
+                if let Some(owner_id) = target_node.owner_id.as_deref() {
+                    if let Some(player) = data.state.players.get(owner_id) {
+                        let reduction = (player.damage_reduction_percent as f64 / 100.0).min(0.99);
+                        effective_flow *= 1.0 - reduction;
+                    }
+                }
+                let damage = effective_flow as i64;
+                target_node.army -= damage;
                 if target_node.army < 0 {
                     target_node.owner_id = Some(attack.owner_id.clone());
                     target_node.army = target_node.army.abs().max(1);
+                    // Destroy any building on a captured node.
+                    target_node.building = None;
                     if let Some(existing_attack) = data.state.attacks.get_mut(&attack_id) {
                         existing_attack.mode = "transfer".to_string();
                     }
@@ -1362,6 +1932,7 @@ impl App {
                 "ownerUsername": owner_username,
                 "ownerColor": owner_color,
                 "ownerState": owner_state,
+                "building": world_node.building.as_ref().map(|b| b.to_label()),
                 "canAttack": player_id.map(|id| world_node.owner_id.as_deref() != Some(id)).unwrap_or(false)
             },
             "geometry": {
@@ -1446,9 +2017,17 @@ impl App {
             "player": player_id.and_then(|player_id| data.state.players.get(player_id)).map(|player| json!({
                 "id": player.id,
                 "username": player.username,
-                "color": player.color
+                "color": player.color,
+                "gold": player.gold,
+                "goldIncomePerSec": player.gold_income_per_sec,
+                "damageReductionPercent": player.damage_reduction_percent,
+                "happinessPercent": player.happiness_percent
             })),
             "buildStatus": self.current_build_status(),
+            "cityFeatures": {
+                "type": "FeatureCollection",
+                "features": self.city_features_locked(&data)
+            },
             "ownedNodes": {
                 "type": "FeatureCollection",
                 "features": owned_nodes
@@ -1898,6 +2477,23 @@ fn haversine_km(a_lat: f64, a_lon: f64, b_lat: f64, b_lon: f64) -> f64 {
     let sin_d_lon = (d_lon / 2.0).sin();
     let h = sin_d_lat * sin_d_lat + lat1.cos() * lat2.cos() * sin_d_lon * sin_d_lon;
     6371.0 * 2.0 * h.sqrt().atan2((1.0 - h).sqrt())
+}
+
+fn circle_polygon(center_lat: f64, center_lon: f64, radius_km: f64) -> Value {
+    // Approximate a circle as a 32-sided polygon.
+    let points: Vec<Vec<f64>> = (0..=32)
+        .map(|i| {
+            let angle = (i as f64) * 2.0 * std::f64::consts::PI / 32.0;
+            // Convert radius in km to degrees (roughly).
+            let d_lat = (radius_km / 111.0) * angle.cos();
+            let d_lon = (radius_km / (111.0 * center_lat.to_radians().cos())) * angle.sin();
+            vec![center_lon + d_lon, center_lat + d_lat]
+        })
+        .collect();
+    json!({
+        "type": "Polygon",
+        "coordinates": [points]
+    })
 }
 
 fn format_army_label(value: i64) -> String {
@@ -2415,6 +3011,43 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     200,
                     &app.attack_node_request(token, &from_node_id, &to_node_id, send_per_tick)?,
                 ))
+            }
+            (&Method::Post, "/api/build") => {
+                let body = parse_body_json(&mut request)?;
+                let token = body
+                    .get("token")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Invalid session.".to_string())?;
+                let node_id = body
+                    .get("nodeId")
+                    .and_then(value_to_string)
+                    .ok_or_else(|| "Invalid node.".to_string())?;
+                let building = body
+                    .get("building")
+                    .and_then(Value::as_str)
+                    .and_then(BuildingType::from_str)
+                    .ok_or_else(|| "Invalid building.".to_string())?;
+                Ok(json_response(200, &app.build_building_request(token, &node_id, building)?))
+            }
+            (&Method::Post, "/api/launch-missile") => {
+                let body = parse_body_json(&mut request)?;
+                let token = body
+                    .get("token")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Invalid session.".to_string())?;
+                let missile_type = body
+                    .get("missileType")
+                    .and_then(Value::as_str)
+                    .unwrap_or("nuke");
+                let target_lat = body
+                    .get("targetLat")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| "Invalid target.".to_string())?;
+                let target_lon = body
+                    .get("targetLon")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| "Invalid target.".to_string())?;
+                Ok(json_response(200, &app.launch_missile_request(token, missile_type, target_lat, target_lon)?))
             }
             (&Method::Post, "/api/connection-rate") => {
                 let body = parse_body_json(&mut request)?;
