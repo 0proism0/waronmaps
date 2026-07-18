@@ -791,6 +791,44 @@ impl App {
         Ok(scored.into_iter().take(10).map(|item| item.0).collect())
     }
 
+    fn choose_start_nodes_around_locked(
+        &self,
+        data: &mut AppData,
+        start_node_id: &str,
+    ) -> Result<Vec<String>, String> {
+        self.sync_world_nodes_locked(data)?;
+        let start_repo = data
+            .node_repo
+            .nodes_by_id
+            .get(start_node_id)
+            .cloned()
+            .ok_or_else(|| "Selected starting node does not exist.".to_string())?;
+        let start_world = data
+            .state
+            .nodes
+            .get(start_node_id)
+            .cloned()
+            .ok_or_else(|| "Selected starting node is not part of the world yet.".to_string())?;
+        if start_world.owner_id.is_some() {
+            return Err("That node is already owned. Choose a neutral node.".to_string());
+        }
+        let mut scored: Vec<(String, f64)> = data
+            .node_repo
+            .nodes_by_id
+            .values()
+            .filter_map(|node| {
+                let world_node = data.state.nodes.get(&node.id)?;
+                if world_node.owner_id.is_some() {
+                    return None;
+                }
+                let dist = haversine_km(start_repo.lat, start_repo.lon, node.lat, node.lon);
+                Some((node.id.clone(), dist))
+            })
+            .collect();
+        scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(scored.into_iter().take(10).map(|item| item.0).collect())
+    }
+
     fn require_session_locked(&self, data: &AppData, token: &str) -> Result<Session, String> {
         data.state
             .sessions
@@ -895,7 +933,13 @@ impl App {
         Ok(targets)
     }
 
-    fn register_player(&self, username: &str, password: &str, color: Option<&str>) -> Result<Value, String> {
+    fn register_player(
+        &self,
+        username: &str,
+        password: &str,
+        color: Option<&str>,
+        start_node_id: Option<&str>,
+    ) -> Result<Value, String> {
         let normalized = username.trim().to_lowercase();
         if normalized.len() < 3 {
             return Err("Username must be at least 3 characters.".to_string());
@@ -903,13 +947,18 @@ impl App {
         if password.len() < 4 {
             return Err("Password must be at least 4 characters.".to_string());
         }
+        let start_node_id = start_node_id.map(|s| s.trim()).filter(|s| !s.is_empty());
         let mut data = self.inner.lock().unwrap();
         if data.state.usernames.contains_key(&normalized) {
             return Err("Username already exists.".to_string());
         }
         let player_id = random_id("player");
         let session_token = random_id("session");
-        let start_nodes = self.choose_start_nodes_locked(&mut data)?;
+        let start_nodes = if let Some(node_id) = start_node_id {
+            self.choose_start_nodes_around_locked(&mut data, node_id)?
+        } else {
+            self.choose_start_nodes_locked(&mut data)?
+        };
         for node_id in &start_nodes {
             data.state.nodes.insert(
                 node_id.clone(),
@@ -2309,8 +2358,9 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 let body = parse_body_json(&mut request)?;
                 let username = body.get("username").and_then(Value::as_str).unwrap_or_default();
                 let password = body.get("password").and_then(Value::as_str).unwrap_or_default();
+                let start_node_id = body.get("startNodeId").and_then(Value::as_str);
                 // The server assigns a random color automatically.
-                Ok(json_response(200, &app.register_player(username, password, None)?))
+                Ok(json_response(200, &app.register_player(username, password, None, start_node_id)?))
             }
             (&Method::Post, "/api/login") => {
                 let body = parse_body_json(&mut request)?;

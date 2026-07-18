@@ -95,11 +95,9 @@
     .toast.success { border-left: 4px solid #22c55e; }
     .toast.error { border-left: 4px solid #ef4444; }
     .toast.info { border-left: 4px solid #3b82f6; }
-    .minimap-toggle { position: absolute; left: 16px; bottom: 166px; z-index: 4; width: 38px; height: 38px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; padding: 0; background: rgba(15, 23, 42, 0.82); border: 1px solid rgba(148, 163, 184, 0.14); box-shadow: 0 10px 24px rgba(2, 6, 23, 0.4); cursor: pointer; color: #f8fafc; }
-    .minimap-toggle:hover { background: rgba(30, 41, 59, 0.9); }
-    .minimap-container { position: absolute; left: 16px; bottom: 16px; z-index: 3; width: 180px; height: 140px; background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(10px); border-radius: 14px; border: 1px solid rgba(148, 163, 184, 0.14); box-shadow: 0 12px 30px rgba(2, 6, 23, 0.4); overflow: hidden; transition: transform 0.25s ease, opacity 0.25s ease; }
-    .minimap-container.hidden { transform: translateX(120%); opacity: 0; pointer-events: none; }
-    .minimap-canvas { width: 100%; height: 100%; display: block; }
+    .leaderboard-panel { position: absolute; top: 86px; right: 16px; z-index: 3; width: min(280px, calc(100vw - 32px)); max-height: min(380px, calc(100vh - 160px)); overflow-y: auto; padding: 14px 16px; color: #f8fafc; background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(14px); box-shadow: 0 20px 50px rgba(2, 6, 23, 0.55); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 18px; }
+    .leaderboard-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: 14px; font-weight: 800; color: #e2e8f0; }
+    .leaderboard-panel-header button { padding: 5px 10px; font-size: 12px; }
     .tutorial-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 23, 0.75); backdrop-filter: blur(4px); opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease; }
     .tutorial-overlay.show { opacity: 1; visibility: visible; }
     .tutorial-card { width: min(420px, calc(100vw - 32px)); background: rgba(15, 23, 42, 0.95); border-radius: 20px; padding: 24px; box-shadow: 0 24px 60px rgba(2, 6, 23, 0.6); border: 1px solid rgba(148, 163, 184, 0.14); }
@@ -118,8 +116,7 @@
       .node-info.hidden { display: block; transform: translateY(110%); opacity: 0; pointer-events: none; }
       .show-panel-button { top: auto; bottom: 16px; left: auto; right: 16px; }
       .toast-container { top: 12px; right: 12px; left: 12px; max-width: none; }
-      .minimap-toggle { left: 16px; bottom: 156px; }
-      .minimap-container { left: 16px; bottom: 16px; width: 160px; height: 120px; }
+      .leaderboard-panel { top: 78px; right: 12px; left: 12px; width: auto; max-height: 35vh; }
     }
   </style>
 </head>
@@ -139,7 +136,7 @@
     <div class="panel-body">
       <p class="panel-subtitle">White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.</p>
       <div class="section">
-        <div id="authSummary" class="status">Register or log in to claim 10 starting nodes.</div>
+        <div id="authSummary" class="status">Register or log in. Click a neutral node on the map to choose where to start.</div>
         <input id="usernameInput" placeholder="username" autocomplete="username">
         <input id="passwordInput" type="password" placeholder="password" autocomplete="current-password">
         <div class="actions">
@@ -158,12 +155,7 @@
         </div>
       </div>
       <div class="section">
-        <div class="section-title">🏆 Leaderboard</div>
-        <div id="leaderboardList" class="leaderboard-list">
-          <div class="leaderboard-empty">Loading leaderboard...</div>
-        </div>
         <div class="actions">
-          <button id="refreshLeaderboardButton" type="button" class="secondary">Refresh</button>
           <button id="locateNodesButton" type="button">Locate My Nodes</button>
           <button id="showTutorialButton" type="button" class="secondary">How to Play</button>
         </div>
@@ -194,6 +186,13 @@
         <button id="updateRouteRateButton" type="button" class="secondary">Update Route Rate</button>
       </div>
     </div>
+    <div id="startNodeAction" class="route-controls hidden">
+      <div id="startNodeHint" class="hint">Choose this node as the center of your starting territory.</div>
+      <div class="actions">
+        <button id="setStartNodeButton" type="button">Start Here</button>
+        <button id="clearStartNodeButton" type="button" class="secondary">Clear</button>
+      </div>
+    </div>
     <div id="connectionTargetsSection" class="route-list hidden">
       <div class="route-list-title">Adjacent Targets</div>
       <div id="connectionTargetsHint" class="hint">Hold Space and drag from the selected node to one of these adjacent targets.</div>
@@ -206,9 +205,14 @@
       <div id="nodeInfoStatus" class="status">Click any visible node to inspect it here.</div>
     </div>
   </div>
-  <button id="minimapToggle" class="minimap-toggle" type="button" title="Toggle minimap" aria-label="Toggle minimap">🗺️</button>
-  <div id="minimapContainer" class="minimap-container">
-    <canvas id="minimapCanvas" class="minimap-canvas" width="180" height="140"></canvas>
+  <div id="leaderboardPanel" class="leaderboard-panel">
+    <div class="leaderboard-panel-header">
+      <span>🏆 Leaderboard</span>
+      <button id="refreshLeaderboardButton" type="button" class="secondary">Refresh</button>
+    </div>
+    <div id="leaderboardList" class="leaderboard-list">
+      <div class="leaderboard-empty">Loading leaderboard...</div>
+    </div>
   </div>
   <div id="toastContainer" class="toast-container"></div>
   <div id="tutorialOverlay" class="tutorial-overlay">
@@ -261,7 +265,6 @@
     const LAST_BUILD_STATUS_KEY = "node-game-build-status-v1";
     const LAST_OWNED_VIEW_KEY = "node-game-owned-view-v1";
     const TUTORIAL_KEY = "node-game-tutorial-v1";
-    const MINIMAP_KEY = "node-game-minimap-v2";
     const BUILD_POLL_MS = 3000;
     const GAME_POLL_MS = 2000;
     const NETWORK_RETRY_MS = 10 * 60 * 1000;
@@ -288,9 +291,6 @@
     const refreshLeaderboardButton = document.getElementById("refreshLeaderboardButton");
     const showTutorialButton = document.getElementById("showTutorialButton");
     const leaderboardListEl = document.getElementById("leaderboardList");
-    const minimapToggle = document.getElementById("minimapToggle");
-    const minimapContainer = document.getElementById("minimapContainer");
-    const minimapCanvas = document.getElementById("minimapCanvas");
     const toastContainer = document.getElementById("toastContainer");
     const tutorialOverlay = document.getElementById("tutorialOverlay");
     const tutorialNextButton = document.getElementById("tutorialNextButton");
@@ -325,6 +325,10 @@
     const nodeRoutesSectionEl = document.getElementById("nodeRoutesSection");
     const nodeRoutesListEl = document.getElementById("nodeRoutesList");
     const nodeInfoStatusEl = document.getElementById("nodeInfoStatus");
+    const startNodeActionEl = document.getElementById("startNodeAction");
+    const startNodeHintEl = document.getElementById("startNodeHint");
+    const setStartNodeButton = document.getElementById("setStartNodeButton");
+    const clearStartNodeButton = document.getElementById("clearStartNodeButton");
 
     let activeRegion = null;
     let buildPollTimer = null;
@@ -346,6 +350,7 @@
     let renderedNodeFeatures = [];
     let renderedNodeFeatureMap = new Map();
     let selectedNodeFeature = null;
+    let selectedStartNodeId = null;
     let spacePressed = false;
     let linkDragState = null;
     let linkDragCursor = { x: 0, y: 0 };
@@ -1308,79 +1313,6 @@
     }
     refreshLeaderboardButton.addEventListener("click", fetchLeaderboard);
 
-    function minimapBounds() {
-      const region = activeRegion?.active_region;
-      if (!region) return null;
-      const bounds = Array.isArray(region.query_bounds) && region.query_bounds.length
-        ? region.query_bounds[0]
-        : region.bounds;
-      return bounds;
-    }
-    let minimapRenderPending = false;
-    function renderMinimap() {
-      if (minimapContainer.classList.contains("hidden") || minimapRenderPending) return;
-      minimapRenderPending = true;
-      requestAnimationFrame(() => {
-        minimapRenderPending = false;
-        const bounds = minimapBounds();
-        if (!bounds || !renderedNodeFeatures.length) {
-          minimapCanvas.getContext("2d").clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-          return;
-        }
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const cssWidth = minimapCanvas.clientWidth || minimapCanvas.width;
-        const cssHeight = minimapCanvas.clientHeight || minimapCanvas.height;
-        if (minimapCanvas.width !== Math.floor(cssWidth * dpr) || minimapCanvas.height !== Math.floor(cssHeight * dpr)) {
-          minimapCanvas.width = Math.floor(cssWidth * dpr);
-          minimapCanvas.height = Math.floor(cssHeight * dpr);
-        }
-        const ctx = minimapCanvas.getContext("2d");
-        ctx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-        ctx.save();
-        ctx.scale(dpr, dpr);
-        const lonSpan = bounds.east - bounds.west;
-        const latSpan = bounds.north - bounds.south;
-        if (lonSpan <= 0 || latSpan <= 0) { ctx.restore(); return; }
-        const padding = 6;
-        const availW = cssWidth - padding * 2;
-        const availH = cssHeight - padding * 2;
-        const scaleX = availW / lonSpan;
-        const scaleY = availH / latSpan;
-        const scale = Math.min(scaleX, scaleY);
-        const drawW = lonSpan * scale;
-        const drawH = latSpan * scale;
-        const offsetX = padding + (availW - drawW) / 2;
-        const offsetY = padding + (availH - drawH) / 2;
-        const nodeSize = 2;
-        const downsample = renderedNodeFeatures.length > 6000 ? 2 : 1;
-        for (let i = 0; i < renderedNodeFeatures.length; i += downsample) {
-          const feature = renderedNodeFeatures[i];
-          const coords = feature.geometry?.coordinates;
-          if (!Array.isArray(coords) || coords.length < 2) continue;
-          const x = Math.floor(offsetX + (coords[0] - bounds.west) * scale);
-          const y = Math.floor(offsetY + (bounds.north - coords[1]) * scale);
-          const color = feature.properties?.ownerColor || (feature.properties?.ownerState === "neutral" ? "#e2e8f0" : "#94a3b8");
-          ctx.fillStyle = color;
-          ctx.fillRect(x, y, nodeSize, nodeSize);
-        }
-        ctx.restore();
-      });
-    }
-    function toggleMinimap() {
-      const hidden = minimapContainer.classList.toggle("hidden");
-      try { localStorage.setItem(MINIMAP_KEY, hidden ? "hidden" : "visible"); } catch {}
-      if (!hidden) renderMinimap();
-    }
-    function loadMinimapState() {
-      const stored = localStorage.getItem(MINIMAP_KEY);
-      if (stored === "hidden") {
-        minimapContainer.classList.add("hidden");
-      } else {
-        minimapContainer.classList.remove("hidden");
-      }
-    }
-    minimapToggle.addEventListener("click", toggleMinimap);
-
     let tutorialStepIndex = 0;
     function updateTutorialStep() {
       tutorialSteps.forEach((step, idx) => step.classList.toggle("active", idx === tutorialStepIndex));
@@ -1743,6 +1675,7 @@
         renderNodeRouteList(null);
         updateClickedNodeHighlight(null);
         updateHoveredNodeHighlight(null);
+        updateStartNodeAction(null);
         return;
       }
       nodeInfoEl.classList.remove("hidden");
@@ -1763,11 +1696,61 @@
       renderSelectedNodeTargets();
       renderNodeRouteList(feature);
       updateClickedNodeHighlight(feature);
+      updateStartNodeAction(feature);
     }
 
     function inspectNode(feature) {
       inspectedNodeId = String(feature?.properties?.id || "") || null;
       updateNodeInfo(feature || null);
+    }
+
+    function updateStartNodeAction(feature) {
+      if (sessionToken || !feature) {
+        startNodeActionEl.classList.add("hidden");
+        return;
+      }
+      const ownerState = feature.properties?.ownerState || "neutral";
+      const nodeId = String(feature.properties?.id || "");
+      if (ownerState !== "neutral") {
+        startNodeHintEl.textContent = "This node is already owned. Choose a neutral (white/gray) node to start.";
+        setStartNodeButton.disabled = true;
+      } else {
+        startNodeHintEl.textContent = selectedStartNodeId === nodeId
+          ? "This node is selected as your starting location."
+          : "Click the button to make this the center of your starting territory.";
+        setStartNodeButton.disabled = false;
+      }
+      clearStartNodeButton.classList.toggle("hidden", !selectedStartNodeId);
+      startNodeActionEl.classList.remove("hidden");
+    }
+
+    function selectStartNode(feature) {
+      if (!feature || feature.properties?.ownerState !== "neutral") {
+        showToast("Choose a neutral node to start.", "error");
+        return;
+      }
+      selectedStartNodeId = String(feature.properties?.id || "");
+      showToast(`Starting territory set to node ${selectedStartNodeId}. Register to claim it.`, "success");
+      updateStartNodeAction(feature);
+      updateAuthSummaryForGuest();
+    }
+
+    function clearStartNode() {
+      selectedStartNodeId = null;
+      updateStartNodeInfo();
+      updateAuthSummaryForGuest();
+    }
+
+    function updateStartNodeInfo() {
+      const feature = renderedNodeFeatures.find((f) => String(f.properties?.id || "") === (inspectedNodeId || "")) || null;
+      updateStartNodeAction(feature);
+    }
+
+    function updateAuthSummaryForGuest() {
+      if (sessionToken) return;
+      authSummaryEl.textContent = selectedStartNodeId
+        ? `Starting node selected: ${selectedStartNodeId}. Enter a username and password, then Register.`
+        : "Register or log in. Click a neutral node on the map to choose where to start.";
     }
 
     async function updateSelectedRouteRate() {
@@ -2518,7 +2501,7 @@
       const nodeId = String(props.id);
       if (!sessionToken) {
         inspectNode(feature);
-        showToast("Log in first, then click one of your green nodes to link.", "error");
+        updateStartNodeAction(feature);
         return;
       }
       if (selectedNodeId === nodeId) {
@@ -2600,7 +2583,6 @@
       syncSelectionFromRenderedFeatures(displayFeatures);
       map.getSource("game-nodes").setData({ type: "FeatureCollection", features: displayFeatures });
       renderedNodeCountEl.textContent = displayFeatures.length.toLocaleString();
-      renderMinimap();
       if (!selectedNodeFeature) {
         clearConnectableTargets();
       }
@@ -2823,7 +2805,9 @@
         setAttackFeatures(state.attacks?.features || []);
         authSummaryEl.textContent = state.player
           ? `Logged in as ${state.player.username}. You own ${ownedFeatures.length} green nodes.`
-          : "Register or log in to claim 10 starting nodes.";
+          : (selectedStartNodeId
+            ? `Starting node selected: ${selectedStartNodeId}. Enter a username and password, then Register.`
+            : "Register or log in. Click a neutral node on the map to choose where to start.");
         activeAttackCountEl.textContent = (state.attacks?.features || []).length.toLocaleString();
         fetchLeaderboard();
         if (state.player && ownedFeatures.length) {
@@ -2899,8 +2883,15 @@
       try {
         setAuthPending(true, actionLabel);
         saveLoginFormState();
+        if (endpoint === REGISTER_URL && !selectedStartNodeId) {
+          throw new Error("Click a neutral node on the map to choose your starting location.");
+        }
         authSummaryEl.textContent = `${actionLabel} in progress...`;
-        const body = JSON.stringify({ username: usernameInput.value.trim(), password: passwordInput.value });
+        const payload = { username: usernameInput.value.trim(), password: passwordInput.value };
+        if (endpoint === REGISTER_URL) {
+          payload.startNodeId = selectedStartNodeId;
+        }
+        const body = JSON.stringify(payload);
         const result = await fetchJson(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body });
         sessionToken = result.token;
         clearNodeTileResponseCache();
@@ -2914,6 +2905,8 @@
         showToast(`${actionLabel} successful. Loading your nodes...`, "success");
         connectWebSocket();
         await refreshGameState();
+        selectedStartNodeId = null;
+        updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         scheduleVisibleTileRefresh(0, true);
         fetchLeaderboard();
       } catch (error) {
@@ -2928,6 +2921,11 @@
 
     registerButton.addEventListener("click", () => submitAuth(REGISTER_URL));
     loginButton.addEventListener("click", () => submitAuth(LOGIN_URL));
+    setStartNodeButton.addEventListener("click", () => {
+      const feature = renderedNodeFeatures.find((f) => String(f.properties?.id || "") === (inspectedNodeId || "")) || null;
+      if (feature) selectStartNode(feature);
+    });
+    clearStartNodeButton.addEventListener("click", clearStartNode);
     usernameInput.addEventListener("input", saveLoginFormState);
     passwordInput.addEventListener("input", saveLoginFormState);
     sendPerTickInput.addEventListener("change", () => {
@@ -2977,11 +2975,13 @@
       panelAutoHiddenForSession = false;
       lastOwnedFeatures = [];
       localStorage.removeItem(SESSION_KEY);
-      authSummaryEl.textContent = "Register or log in to claim 10 starting nodes.";
+      authSummaryEl.textContent = "Register or log in. Click a neutral node on the map to choose where to start.";
       selectedNodeId = null;
       selectedNodeFeature = null;
+      selectedStartNodeId = null;
       selectedNodeTextEl.textContent = "None";
       inspectedNodeId = null;
+      startNodeActionEl.classList.add("hidden");
       clearSelectedNodeTargets();
       updateNodeInfo(null);
       clearConnectableTargets();
@@ -3111,7 +3111,6 @@
       }
       setSendPerTickValue(DEFAULT_SEND_PER_TICK);
       loadPanelState();
-      loadMinimapState();
       fetchLeaderboard();
       const storedBuildStatus = loadStoredBuildStatus();
       if (storedBuildStatus) {
