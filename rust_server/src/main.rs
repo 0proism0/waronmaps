@@ -247,6 +247,10 @@ struct Attack {
 struct GameState {
     version: i64,
     saved_at: i64,
+    // Game clock baseline, advanced only by tick_world_locked. Separate from
+    // saved_at so mutation-triggered saves do not perturb elapsed-tick math.
+    #[serde(default)]
+    last_tick_at: i64,
     #[serde(default)]
     last_persisted_at: i64,
     #[serde(default)]
@@ -266,12 +270,14 @@ impl GameState {
         Self {
             version: 1,
             saved_at: now_ms(),
+            last_tick_at: now_ms(),
             last_persisted_at: now_ms(),
             players: HashMap::new(),
             usernames: HashMap::new(),
             sessions: HashMap::new(),
             nodes: HashMap::new(),
             attacks: HashMap::new(),
+            building_cooldowns: HashMap::new(),
         }
     }
 }
@@ -832,7 +838,7 @@ impl App {
     }
 
     fn warm_node_repo(&self) -> Result<(), String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         println!("Warming node repository...");
         self.ensure_node_repo_fresh(&mut data, true)?;
         self.sync_world_nodes_locked(&mut data)?;
@@ -1275,7 +1281,7 @@ impl App {
         node_id: &str,
         building: BuildingType,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
         self.build_building_locked(&mut data, &session.player_id, node_id, building)
     }
@@ -1287,7 +1293,7 @@ impl App {
         target_lat: f64,
         target_lon: f64,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
         self.launch_missile_locked(&mut data, &session.player_id, missile_type, target_lat, target_lon)
     }
@@ -1475,7 +1481,7 @@ impl App {
             return Err("Password must be at least 4 characters.".to_string());
         }
         let start_node_id = start_node_id.map(|s| s.trim()).filter(|s| !s.is_empty());
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         if data.state.usernames.contains_key(&normalized) {
             return Err("Username already exists.".to_string());
         }
@@ -1526,13 +1532,14 @@ impl App {
                 expires_at: now + 7 * 24 * 60 * 60 * 1000,
             },
         );
+        self.purge_expired_sessions_locked(&mut data);
         self.save_state_locked(&mut data.state)?;
         Ok(json!({ "playerId": player_id, "token": session_token }))
     }
 
     fn login_player(&self, username: &str, password: &str) -> Result<Value, String> {
         let normalized = username.trim().to_lowercase();
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let player_id = data
             .state
             .usernames
@@ -1565,12 +1572,13 @@ impl App {
                 player_ref.password_hash = hash_password_argon2(password)?;
             }
         }
+        self.purge_expired_sessions_locked(&mut data);
         self.save_state_locked(&mut data.state)?;
         Ok(json!({ "playerId": player_id, "token": session_token }))
     }
 
     fn logout_player(&self, token: &str) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         data.state.sessions.remove(token);
         self.save_state_locked(&mut data.state)?;
         Ok(json!({ "ok": true }))
@@ -1709,8 +1717,8 @@ impl App {
 
     fn tick_world_locked(&self, data: &mut AppData) -> Result<(), String> {
         let current = now_ms();
-        let last = if data.state.saved_at > 0 {
-            data.state.saved_at
+        let last = if data.state.last_tick_at > 0 {
+            data.state.last_tick_at
         } else {
             current
         };
@@ -1724,7 +1732,7 @@ impl App {
         for _ in 0..elapsed_ticks {
             self.step_world_locked(data)?;
         }
-        data.state.saved_at = current;
+        data.state.last_tick_at = current;
         // Avoid serializing the entire world to disk every single second.
         // The background ticker only persists every 5 seconds; mutating
         // endpoints still call save_state_locked directly when they change state.
@@ -2025,13 +2033,14 @@ impl App {
     }
 
     fn game_state_response(&self, token: Option<&str>, include_nodes: bool) -> Result<Value, String> {
-        let data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
         // The background ticker advances the world, so read-only responses
         // do not need to pay for a full lock-held tick.
         let player_id = session.as_ref().map(|session| session.player_id.as_str());
+        self.ensure_city_membership_locked(&mut data);
         let owned_nodes = self.owned_node_features_locked(&data, player_id);
         let node_features = if include_nodes {
             data.state
@@ -2096,7 +2105,7 @@ impl App {
     }
 
     fn leaderboard_response(&self, token: Option<&str>) -> Result<Value, String> {
-        let data = self.inner.lock().unwrap();
+        let data = app_lock(&self.inner);
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
@@ -2199,10 +2208,13 @@ impl App {
         x: i64,
         y: i64,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
         let player_id = Some(session.player_id.as_str());
         let node_ids = self.node_ids_for_tile_locked(&mut data, z, x, y)?;
+        // The repo may have been reloaded above; refresh caches before
+        // world_feature_locked consults them.
+        self.ensure_city_membership_locked(&mut data);
         let features = node_ids
             .iter()
             .filter_map(|node_id| self.world_feature_locked(&data, node_id, player_id))
@@ -2224,7 +2236,7 @@ impl App {
         from_node_id: &str,
         candidate_node_ids: &[String],
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
         if candidate_node_ids.len() > 20_000 {
             return Err("Too many candidate nodes requested.".to_string());
@@ -2275,9 +2287,8 @@ impl App {
         from_node_id: &str,
         to_node_id: &str,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
-        self.tick_world_locked(&mut data)?;
         let matching_ids = data
             .state
             .attacks
@@ -2312,7 +2323,7 @@ impl App {
         from_node_id: &str,
         to_node_id: &str,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
         let (mode, path, owner_state) =
             self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
@@ -2333,9 +2344,8 @@ impl App {
         to_node_id: &str,
         send_per_tick: i64,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
-        self.tick_world_locked(&mut data)?;
         let existing_attack_id = data
             .state
             .attacks
@@ -2388,9 +2398,8 @@ impl App {
         to_node_id: &str,
         send_per_tick: i64,
     ) -> Result<Value, String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
-        self.tick_world_locked(&mut data)?;
         let next_rate = sanitize_send_per_tick(send_per_tick);
         let attack = data
             .state
@@ -2408,8 +2417,17 @@ impl App {
     }
 
     fn background_tick(&self) -> Result<(), String> {
-        let mut data = self.inner.lock().unwrap();
+        let mut data = app_lock(&self.inner);
         self.tick_world_locked(&mut data)?;
+        // Periodically drop expired sessions so state.json does not grow
+        // forever; persist only when something was actually removed.
+        data.ticks_since_session_purge += 1;
+        if data.ticks_since_session_purge >= 60 {
+            data.ticks_since_session_purge = 0;
+            if self.purge_expired_sessions_locked(&mut data) {
+                self.save_state_locked(&mut data.state)?;
+            }
+        }
         let version = data.state.version;
         let update = json!({
             "type": "world-update",
@@ -2456,6 +2474,12 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or(0)
+}
+
+// Tolerate mutex poisoning: a panicking request handler must not take down
+// every subsequent request with "PoisonError" unwraps.
+fn app_lock(m: &Mutex<AppData>) -> std::sync::MutexGuard<'_, AppData> {
+    m.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 fn file_mtime_ms(path: &Path) -> Option<i64> {
@@ -2857,8 +2881,10 @@ async fn handle_ws_client(
                 if let Ok(value) = serde_json::from_str::<Value>(&text) {
                     if value.get("type").and_then(Value::as_str) == Some("auth") {
                         if let Some(token) = value.get("token").and_then(Value::as_str) {
-                            let data = app.inner.lock().unwrap();
-                            if let Some(session) = data.state.sessions.get(token) {
+                            let data = app_lock(&app.inner);
+                            // Same rules as HTTP auth: session exists, is
+                            // unexpired, and references an existing player.
+                            if let Ok(session) = app.require_session_locked(&data, token) {
                                 return Some(session.player_id.clone());
                             }
                         }
@@ -3185,7 +3211,10 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     &app.connection_preview_request(token, &from_node_id, &to_node_id)?,
                 ))
             }
-            (&Method::Get, "/api/build-status") => Ok(json_response(200, &app.current_build_status())),
+            (&Method::Get, "/api/build-status") => {
+                let mut data = app_lock(&app.inner);
+                Ok(json_response(200, &app.current_build_status(&mut data)))
+            }
             _ => Ok(app.serve_static(&pathname)),
         }
     })()
