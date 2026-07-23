@@ -419,8 +419,7 @@
     let wsConnection = null;
     let wsConnected = false;
     let wsReconnectTimer = null;
-    let wsMessageCount = 0;
-    let lastWsMessageAt = 0;
+    let wsCloseHandler = null;
     let wsReconnectAttempts = 0;
     let sessionToken = localStorage.getItem(SESSION_KEY) || "";
     let selectedNodeId = null;
@@ -801,14 +800,7 @@
       reconcileLocalAttacks(serverFeatures);
       const localFeatures = (currentAttackFeatures || []).filter((feature) => feature?.properties?.local);
       currentAttackFeatures = [...serverFeatures, ...localFeatures];
-      map.getSource("attack-lines")?.setData({
-        type: "FeatureCollection",
-        features: currentAttackFeatures,
-      });
-      map.getSource("attack-flow-arrows")?.setData({
-        type: "FeatureCollection",
-        features: [],
-      });
+      renderStateGeneration += 1;
     }
     function clearSelectedNodeTargets() {
       selectedNodeTargets = [];
@@ -1400,24 +1392,44 @@
     }
     function renderLeaderboard(entries) {
       if (!Array.isArray(entries) || entries.length === 0) {
-        leaderboardListEl.innerHTML = '<div class="leaderboard-empty">No players yet.</div>';
+        const emptyEl = document.createElement("div");
+        emptyEl.className = "leaderboard-empty";
+        emptyEl.textContent = "No players yet.";
+        leaderboardListEl.replaceChildren(emptyEl);
         return;
       }
       const ownId = currentPlayerId || (sessionToken ? null : null);
-      const html = entries.map((entry, idx) => {
+      const rowEls = entries.map((entry, idx) => {
         const rank = idx + 1;
         const playerId = entry.playerId || entry.id || "";
         const isSelf = ownId && playerId === ownId;
         const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank;
         const nodes = typeof entry.nodes === "number" ? entry.nodes : 0;
         const army = typeof entry.army === "number" ? entry.army : 0;
-        return `<div class="leaderboard-row${isSelf ? " self" : ""}">
-          <div class="leaderboard-rank">${medal}</div>
-          <div class="leaderboard-name" title="${escapeHtml(entry.username || "Unknown")}">${escapeHtml(entry.username || "Unknown")}</div>
-          <div class="leaderboard-score"><strong>${army.toLocaleString()}</strong> army · ${nodes.toLocaleString()} nodes</div>
-        </div>`;
-      }).join("");
-      leaderboardListEl.innerHTML = html;
+        const username = entry.username || "Unknown";
+
+        const rowEl = document.createElement("div");
+        rowEl.className = `leaderboard-row${isSelf ? " self" : ""}`;
+
+        const rankEl = document.createElement("div");
+        rankEl.className = "leaderboard-rank";
+        rankEl.textContent = String(medal);
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "leaderboard-name";
+        nameEl.title = username;
+        nameEl.textContent = username;
+
+        const scoreEl = document.createElement("div");
+        scoreEl.className = "leaderboard-score";
+        const armyEl = document.createElement("strong");
+        armyEl.textContent = army.toLocaleString();
+        scoreEl.append(armyEl, ` army · ${nodes.toLocaleString()} nodes`);
+
+        rowEl.append(rankEl, nameEl, scoreEl);
+        return rowEl;
+      });
+      leaderboardListEl.replaceChildren(...rowEls);
     }
     function escapeHtml(str) {
       return String(str).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
@@ -1494,6 +1506,7 @@
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
           const error = new Error(body.error || `Request failed with HTTP ${response.status}`);
+          error.status = response.status;
           error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
           throw error;
         }
@@ -2449,44 +2462,10 @@
       drawConnectionPath(coords, color, width, [DASH_LEN, GAP_LEN], dashOffset, "butt");
     }
 
-    function drawArrowHead(point, color, scale = 1) {
-      if (!point?.segmentStart || !point?.segmentEnd) {
-        return;
-      }
-      const start = projectCached(point.segmentStart);
-      const end = projectCached(point.segmentEnd);
-      const center = projectCached(point.coordinates);
-      const angle = Math.atan2(end.y - start.y, end.x - start.x);
-      const zoom = map.getZoom();
-      const size = Math.max(8, Math.min(16, 5 + (zoom * 0.55))) * scale;
-      connectionCanvasContext.save();
-      connectionCanvasContext.translate(center.x, center.y);
-      connectionCanvasContext.rotate(angle);
-      connectionCanvasContext.beginPath();
-      connectionCanvasContext.moveTo(size, 0);
-      connectionCanvasContext.lineTo(-size * 0.65, size * 0.55);
-      connectionCanvasContext.lineTo(-size * 0.65, -size * 0.55);
-      connectionCanvasContext.closePath();
-      connectionCanvasContext.fillStyle = color;
-      connectionCanvasContext.strokeStyle = "rgba(15, 23, 42, 0.96)";
-      connectionCanvasContext.lineWidth = 1.1;
-      connectionCanvasContext.fill();
-      connectionCanvasContext.stroke();
-      connectionCanvasContext.restore();
-    }
-
-    function cameraCacheKey() {
-      const transform = map ? map.transform : null;
-      if (!transform) {
-        return "";
-      }
-      return `${transform.zoom.toFixed(3)}|${transform.bearing.toFixed(2)}|${transform.pitch.toFixed(2)}|${transform.center.lng.toFixed(5)}|${transform.center.lat.toFixed(5)}`;
-    }
     function projectCached(coord) {
-      const camera = cameraCacheKey();
-      if (camera !== cachedProjectedPointsKey) {
+      if (cameraGeneration !== cachedProjectedPointsGeneration) {
         cachedProjectedPoints.clear();
-        cachedProjectedPointsKey = camera;
+        cachedProjectedPointsGeneration = cameraGeneration;
       }
       const coordKey = `${Number(coord[0]).toFixed(6)},${Number(coord[1]).toFixed(6)}`;
       if (cachedProjectedPoints.has(coordKey)) {
@@ -2699,6 +2678,7 @@
       try {
         localStorage.setItem(LAST_BUILD_STATUS_KEY, JSON.stringify(buildStatus));
       } catch {}
+      return isComplete;
     }
 
     function applyBuildRetryState(error) {
@@ -2843,8 +2823,9 @@
 
     async function refreshBuildProgress() {
       const buildStatus = await fetchJson(BUILD_STATUS_URL, { cache: "no-store" });
-      applyBuildStatus(buildStatus);
+      const isComplete = applyBuildStatus(buildStatus);
       await loadQueryBlocks();
+      return isComplete;
     }
 
     function syncSelectionFromRenderedFeatures(features) {
@@ -3075,8 +3056,6 @@
           scheduleVisibleTileRefresh(100, false);
         });
         wsConnection.addEventListener("message", (event) => {
-          wsMessageCount += 1;
-          lastWsMessageAt = Date.now();
           try {
             const message = JSON.parse(event.data);
             handleWsMessage(message);
@@ -3084,12 +3063,16 @@
             console.warn("Failed to parse WebSocket message:", event.data, error);
           }
         });
-        wsConnection.addEventListener("close", () => {
+        wsCloseHandler = () => {
           wsConnected = false;
           wsConnection = null;
           wsReconnectAttempts += 1;
           scheduleWsReconnect();
-        });
+          if (sessionToken) {
+            scheduleGamePollLoop(0);
+          }
+        };
+        wsConnection.addEventListener("close", wsCloseHandler);
         wsConnection.addEventListener("error", (error) => {
           console.warn("WebSocket error:", error);
         });
@@ -3107,7 +3090,10 @@
         const ws = wsConnection;
         wsConnection = null;
         wsConnected = false;
-        ws.onclose = null;
+        if (wsCloseHandler) {
+          ws.removeEventListener("close", wsCloseHandler);
+          wsCloseHandler = null;
+        }
         ws.close();
       }
     }
@@ -3195,39 +3181,44 @@
         if (error.retryable) {
           throw error;
         }
-        sessionToken = "";
-        disconnectWebSocket();
-        currentPlayerId = null;
-        clearNodeTileResponseCache();
-        autoFocusedPlayerId = null;
-        lastOwnedFeatures = [];
-        selectedNodeId = null;
-        selectedNodeFeature = null;
-        setAttackFeatures([]);
-        clearConnectableTargets();
-        localStorage.removeItem(SESSION_KEY);
-        authSummaryEl.textContent = error.message;
-        showMainPanel(true);
-        showToast(`Session cleared: ${error.message}`, "error");
+        if (error.status === 401) {
+          handleSessionExpired(error.message);
+          return;
+        }
+        setStatus(`Game state refresh failed: ${error.message}`);
       }
     }
 
     async function buildPollLoop() {
+      let buildComplete = false;
       try {
-        await refreshBuildProgress();
+        buildComplete = await refreshBuildProgress();
         nextBuildPollDelayMs = BUILD_POLL_MS;
       } catch (error) {
         nextBuildPollDelayMs = error.retryable ? (error.retryAfterMs || NETWORK_RETRY_MS) : BUILD_POLL_MS;
         applyBuildRetryState(error);
       } finally {
-        buildPollTimer = window.setTimeout(buildPollLoop, nextBuildPollDelayMs);
+        if (buildComplete) {
+          buildPollTimer = null;
+        } else {
+          buildPollTimer = window.setTimeout(buildPollLoop, nextBuildPollDelayMs);
+        }
       }
+    }
+
+    function scheduleGamePollLoop(delayMs = nextGamePollDelayMs) {
+      if (gamePollTimer) {
+        return;
+      }
+      gamePollTimer = window.setTimeout(() => {
+        gamePollTimer = null;
+        void gamePollLoop();
+      }, delayMs);
     }
 
     async function gamePollLoop() {
       try {
         await refreshGameState();
-        clearNodeTileResponseCache();
         scheduleVisibleTileRefresh(100, false);
         nextGamePollDelayMs = GAME_POLL_MS;
       } catch (error) {
@@ -3235,7 +3226,7 @@
         setStatus(`Game polling failed: ${error.message}. Retrying in ${formatRetryDelay(nextGamePollDelayMs)}.`);
       } finally {
         if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
-          gamePollTimer = window.setTimeout(gamePollLoop, nextGamePollDelayMs);
+          scheduleGamePollLoop(nextGamePollDelayMs);
         }
       }
     }
@@ -3335,6 +3326,7 @@
       panelAutoHiddenForSession = false;
       lastOwnedFeatures = [];
       localStorage.removeItem(SESSION_KEY);
+      clearNodeTileResponseCache();
       authSummaryEl.textContent = "Register or log in. Click a neutral node on the map to choose where to start.";
       selectedNodeId = null;
       selectedNodeFeature = null;
@@ -3414,7 +3406,7 @@
 
     function initializeMap() {
       map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/liberty", center: [-70.5, 43.8], zoom: 11.8 });
-      window.map = map;
+      map.on("move", () => { cameraGeneration += 1; });
       map.addControl(new maplibregl.NavigationControl(), "top-right");
       map.on("load", async () => {
       const style = map.getStyle();
@@ -3431,11 +3423,11 @@
       map.addSource("connectable-nodes", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("selected-node", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("hover-node", { type: "geojson", data: emptyFeatureCollection() });
-      map.addSource("attack-lines", { type: "geojson", data: emptyFeatureCollection() });
-      map.addSource("attack-flow-arrows", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("city-borders", { type: "geojson", data: emptyFeatureCollection() });
-      map.addSource("missile-target", { type: "geojson", data: emptyFeatureCollection() });
-      map.addSource("sam-ranges", { type: "geojson", data: emptyFeatureCollection() });
+      if (FEATURE_BUILDINGS) {
+        map.addSource("missile-target", { type: "geojson", data: emptyFeatureCollection() });
+        map.addSource("sam-ranges", { type: "geojson", data: emptyFeatureCollection() });
+      }
 
       map.addLayer({ id: "region-overview-fill", type: "fill", source: "region-overview", paint: { "fill-color": "#ef4444", "fill-opacity": 0.05 }, maxzoom: 8 });
       map.addLayer({ id: "region-overview-line", type: "line", source: "region-overview", paint: { "line-color": "#ef4444", "line-width": 2 }, maxzoom: 8 });
