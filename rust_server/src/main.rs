@@ -98,6 +98,8 @@ struct BoundaryRepo {
     refreshed_at: i64,
     signature: String,
     features: Vec<BoundaryFeature>,
+    // Union of all feature bboxes; used to cheaply reject off-region tiles.
+    overall_bbox: Option<BBox>,
 }
 
 #[derive(Clone)]
@@ -559,6 +561,15 @@ impl App {
             .collect();
         data.boundary_repo.signature = next_signature;
         data.boundary_repo.refreshed_at = now;
+        let mut overall = BBox::empty();
+        for feature in &data.boundary_repo.features {
+            overall.west = overall.west.min(feature.bbox.west);
+            overall.east = overall.east.max(feature.bbox.east);
+            overall.south = overall.south.min(feature.bbox.south);
+            overall.north = overall.north.max(feature.bbox.north);
+        }
+        data.boundary_repo.overall_bbox =
+            (overall.west <= overall.east && overall.south <= overall.north).then_some(overall);
         Ok(())
     }
 
@@ -1274,24 +1285,50 @@ impl App {
             "hydrogen" => (MISSILE_HYDROGEN_COST, MISSILE_HYDROGEN_RADIUS_KM),
             _ => return Err("Unknown missile type.".to_string()),
         };
+        // Reject targets outside the loaded map region.
+        if let Some(bbox) = &data.boundary_repo.overall_bbox {
+            if target_lon < bbox.west
+                || target_lon > bbox.east
+                || target_lat < bbox.south
+                || target_lat > bbox.north
+            {
+                return Err("Target is outside the active map region.".to_string());
+            }
+        }
         let now = now_ms();
-        let has_silo = data.state.nodes.values().any(|node| {
-            node.owner_id.as_deref() == Some(player_id) && node.building == Some(BuildingType::Silo)
-        });
-        if !has_silo {
+        let silo_ids: Vec<String> = data
+            .state
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                (node.owner_id.as_deref() == Some(player_id)
+                    && node.building == Some(BuildingType::Silo))
+                .then(|| node_id.clone())
+            })
+            .collect();
+        if silo_ids.is_empty() {
             return Err("You need a Silo to launch missiles.".to_string());
         }
         let player = data.state.players.get(player_id).ok_or_else(|| "Player not found.".to_string())?;
         if player.gold < cost {
             return Err(format!("Not enough gold. This missile costs {} gold.", cost));
         }
-        if now - player.last_silo_fire_at < SILO_COOLDOWN_MS {
-            return Err("Silo is on cooldown.".to_string());
-        }
+        // Cooldowns are per silo: firing requires at least one owned Silo
+        // whose own cooldown is ready, and that silo gets stamped.
+        let ready_silo_id = silo_ids
+            .iter()
+            .find(|node_id| {
+                now - data.state.building_cooldowns.get(*node_id).copied().unwrap_or(0)
+                    >= SILO_COOLDOWN_MS
+            })
+            .cloned()
+            .ok_or_else(|| "Silo is on cooldown.".to_string())?;
 
-        // SAM interception: any enemy SAM within SAM_RADIUS_KM of the target can intercept.
+        // SAM interception: any enemy SAM within SAM_RADIUS_KM of the target
+        // whose own cooldown is ready can intercept.
         let mut intercepted = false;
         let mut interceptor_id: Option<String> = None;
+        let mut interceptor_sam_id: Option<String> = None;
         let sam_owners: Vec<String> = data
             .state
             .players
@@ -2299,13 +2336,41 @@ impl App {
     ) -> Result<Vec<String>, String> {
         self.ensure_node_repo_fresh(data, false)?;
         let zoom = clamp_i64(z, 0, 22);
+        let tiles_per_side = 1_i64 << zoom;
+        if x < 0 || y < 0 || x >= tiles_per_side || y >= tiles_per_side {
+            return Err("Invalid tile coordinates.".to_string());
+        }
         let key = format!("{}:{}:{}:{}", data.node_repo.graph_version, zoom, x, y);
         if let Some(ids) = data.node_repo.tile_node_id_cache.get(&key) {
             return Ok(ids.clone());
         }
         let bounds = tile_bounds(zoom, x, y);
+        // Cheap reject: tiles outside the loaded region's overall bbox cannot
+        // contain any nodes, so skip the S2 cover recursion entirely.
+        if let Some(region) = data.boundary_repo.overall_bbox {
+            let intersects = bounds.west <= region.east
+                && bounds.east >= region.west
+                && bounds.south <= region.north
+                && bounds.north >= region.south;
+            if !intersects {
+                return Ok(Vec::new());
+            }
+        }
+        // Clamp the cover to the region: a low-zoom tile (z=0 covers the whole
+        // planet) must not make the S2 cover recursion walk cells that cannot
+        // contain any node. `bounds` itself stays unclamped so the exact
+        // per-node filter below keeps its tile-border semantics.
+        let cover_bounds = match &data.boundary_repo.overall_bbox {
+            Some(region) => BBox {
+                west: bounds.west.max(region.west),
+                east: bounds.east.min(region.east),
+                south: bounds.south.max(region.south),
+                north: bounds.north.min(region.north),
+            },
+            None => bounds.clone(),
+        };
         let level = data.node_repo.s2_index_level;
-        let cover = s2_cover_for_bounds(&bounds, level);
+        let cover = s2_cover_for_bounds(&cover_bounds, level);
         let mut node_ids = Vec::new();
         for cell in cover {
             if let Some(&(start, end)) = data.node_repo.s2_cell_ranges.get(&cell.0) {
@@ -2784,10 +2849,11 @@ fn point_in_ring(lon: f64, lat: f64, ring: &[(f64, f64)]) -> bool {
     for i in 0..ring.len() {
         let (xi, yi) = ring[i];
         let (xj, yj) = ring[j];
-        let intersects = ((yi > lat) != (yj > lat))
-            && (lon < ((xj - xi) * (lat - yi)) / ((yj - yi).abs().max(f64::EPSILON)) + xi);
-        if intersects {
-            inside = !inside;
+        if (yi > lat) != (yj > lat) {
+            let x_intersection = xi + (lat - yi) * (xj - xi) / (yj - yi);
+            if lon < x_intersection {
+                inside = !inside;
+            }
         }
         j = i;
     }
