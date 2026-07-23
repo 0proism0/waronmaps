@@ -34,7 +34,6 @@
     .route-controls .actions { margin-top: 8px; }
     .route-list { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(148, 163, 184, 0.14); }
     .route-list.hidden { display: none; }
-    #buildControls, #siloControls { display: none !important; }
     .route-list-title { margin-bottom: 8px; color: #e2e8f0; font-size: 13px; font-weight: 700; }
     .route-row { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid rgba(148, 163, 184, 0.12); }
     .route-row:first-child { border-top: 0; padding-top: 0; }
@@ -154,39 +153,12 @@
           <div class="stat"><span>Rendered nodes</span><strong id="renderedNodeCount">0</strong></div>
           <div class="stat"><span>Active attacks</span><strong id="activeAttackCount">0</strong></div>
           <div class="stat"><span>Selected node</span><strong id="selectedNodeText">None</strong></div>
-          <div id="goldStat" class="stat" style="display: none;"><span>Gold</span><strong id="goldText">0</strong></div>
-          <div id="incomeStat" class="stat" style="display: none;"><span>Income / sec</span><strong id="incomeText">0</strong></div>
         </div>
       </div>
       <div class="section">
         <div class="actions">
           <button id="locateNodesButton" type="button">Locate My Nodes</button>
           <button id="showTutorialButton" type="button" class="secondary">How to Play</button>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-title">🚀 Missile Strike</div>
-        <div class="hint">Requires a Silo. Pick a warhead, then click the map to fire.</div>
-        <div class="actions">
-          <button id="launchSmallButton" type="button" class="secondary">Small</button>
-          <button id="launchNukeButton" type="button" class="secondary">Nuke</button>
-          <button id="launchHydrogenButton" type="button" class="secondary">H-Bomb</button>
-        </div>
-        <div id="missileStatus" class="status"></div>
-      </div>
-      <div id="buildingEffectsSection" class="section" style="display: none;">
-        <div class="section-title">🏗 Building Effects</div>
-        <div id="buildingEffectsList" class="hint" style="display: grid; gap: 6px; line-height: 1.4;">
-          Loading...
-        </div>
-      </div>
-      <div id="mapOverlaysSection" class="section" style="display: none;">
-        <div class="section-title">🗺 Map Overlays</div>
-        <div class="hint" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><input id="toggleCityBorders" type="checkbox" checked> City borders</label>
-          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><input id="toggleSamRanges" type="checkbox" checked> SAM ranges</label>
-          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><input id="toggleBuildingRings" type="checkbox" checked> Building markers</label>
-          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><input id="toggleMissileTarget" type="checkbox" checked> Missile target</label>
         </div>
       </div>
       <div class="section">
@@ -207,30 +179,6 @@
       <div class="stat"><span>Army</span><strong id="nodeInfoArmy">0</strong></div>
       <div class="stat"><span>Net per 1s tick</span><strong id="nodeInfoDelta">0</strong></div>
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
-      <div id="nodeInfoBuildingStat" class="stat" style="display: none;"><span>Building</span><strong id="nodeInfoBuilding">None</strong></div>
-    </div>
-    <div id="siloControls" class="route-controls hidden">
-      <div class="route-list-title">🚀 Launch from this Silo</div>
-      <div class="hint">Pick a warhead, then click the map to fire.</div>
-      <div class="actions">
-        <button id="siloLaunchSmallButton" type="button" class="secondary">Small</button>
-        <button id="siloLaunchNukeButton" type="button" class="secondary">Nuke</button>
-        <button id="siloLaunchHydrogenButton" type="button" class="secondary">H-Bomb</button>
-      </div>
-    </div>
-    <div id="buildControls" class="route-controls hidden">
-      <div class="route-list-title">🏗 Build on this node</div>
-      <div id="buildHint" class="hint"></div>
-      <div class="actions" style="flex-wrap: wrap;">
-        <button id="buildBarracksButton" type="button" class="secondary">Barracks</button>
-        <button id="buildCityButton" type="button" class="secondary">City</button>
-        <button id="buildMarketButton" type="button" class="secondary">Market</button>
-        <button id="buildBankButton" type="button" class="secondary">Bank</button>
-        <button id="buildHospitalButton" type="button" class="secondary">Hospital</button>
-        <button id="buildBarButton" type="button" class="secondary">Bar</button>
-        <button id="buildSiloButton" type="button" class="secondary">Silo</button>
-        <button id="buildSamButton" type="button" class="secondary">SAM</button>
-      </div>
     </div>
     <div class="route-controls">
       <label for="sendPerTickInput">New connection army per 1s tick</label>
@@ -338,6 +286,10 @@
     const ZOOM_IN_MESSAGE = "Please zoom in to see nodes.";
     const DEFAULT_SEND_PER_TICK = 1;
     const HIDE_NODE_INFORMATION_TEST = false;
+    // Master switch for the buildings/gold/missiles feature. Disabled product-wide:
+    // the server also gates /api/build and /api/launch-missile behind BUILDINGS_ENABLED = false.
+    // To re-enable: flip this to true and restore the deleted markup from git history.
+    const FEATURE_BUILDINGS = false;
     const panelEl = document.getElementById("panel");
     const panelTitleEl = document.getElementById("panelTitle");
     const showPanelButton = document.getElementById("showPanelButton");
@@ -362,8 +314,6 @@
     const renderedNodeCountEl = document.getElementById("renderedNodeCount");
     const activeAttackCountEl = document.getElementById("activeAttackCount");
     const selectedNodeTextEl = document.getElementById("selectedNodeText");
-    const goldTextEl = document.getElementById("goldText");
-    const incomeTextEl = document.getElementById("incomeText");
     const statusEl = document.getElementById("status");
     const nodeInfoEl = document.getElementById("nodeInfo");
     const nodeInfoTitleEl = document.getElementById("nodeInfoTitle");
@@ -372,7 +322,6 @@
     const nodeInfoArmyEl = document.getElementById("nodeInfoArmy");
     const nodeInfoDeltaEl = document.getElementById("nodeInfoDelta");
     const nodeInfoPositionEl = document.getElementById("nodeInfoPosition");
-    const nodeInfoBuildingEl = document.getElementById("nodeInfoBuilding");
     const sendPerTickInput = document.getElementById("sendPerTickInput");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
@@ -384,31 +333,6 @@
     const nodeRoutesListEl = document.getElementById("nodeRoutesList");
     const nodeInfoStatusEl = document.getElementById("nodeInfoStatus");
     const closeNodeInfoButton = document.getElementById("closeNodeInfoButton");
-    const buildControlsEl = document.getElementById("buildControls");
-    const buildHintEl = document.getElementById("buildHint");
-    const siloControlsEl = document.getElementById("siloControls");
-    const buildButtons = {
-      Barracks: document.getElementById("buildBarracksButton"),
-      City: document.getElementById("buildCityButton"),
-      Market: document.getElementById("buildMarketButton"),
-      Bank: document.getElementById("buildBankButton"),
-      Hospital: document.getElementById("buildHospitalButton"),
-      Bar: document.getElementById("buildBarButton"),
-      Silo: document.getElementById("buildSiloButton"),
-      SAM: document.getElementById("buildSamButton"),
-    };
-    const launchSmallButton = document.getElementById("launchSmallButton");
-    const launchNukeButton = document.getElementById("launchNukeButton");
-    const launchHydrogenButton = document.getElementById("launchHydrogenButton");
-    const siloLaunchSmallButton = document.getElementById("siloLaunchSmallButton");
-    const siloLaunchNukeButton = document.getElementById("siloLaunchNukeButton");
-    const siloLaunchHydrogenButton = document.getElementById("siloLaunchHydrogenButton");
-    const missileStatusEl = document.getElementById("missileStatus");
-    const toggleCityBorders = document.getElementById("toggleCityBorders");
-    const toggleSamRanges = document.getElementById("toggleSamRanges");
-    const toggleBuildingRings = document.getElementById("toggleBuildingRings");
-    const toggleMissileTarget = document.getElementById("toggleMissileTarget");
-    const buildingEffectsListEl = document.getElementById("buildingEffectsList");
     const startNodeActionEl = document.getElementById("startNodeAction");
     const startNodeHintEl = document.getElementById("startNodeHint");
     const clearStartNodeButton = document.getElementById("clearStartNodeButton");
@@ -1353,20 +1277,22 @@
       inspectedNodeId = null;
       updateNodeInfo(null);
     });
-    for (const [building, button] of Object.entries(buildButtons)) {
-      if (!button) continue;
-      button.addEventListener("click", () => buildBuilding(building));
+    if (FEATURE_BUILDINGS) {
+      for (const [building, button] of Object.entries(buildButtons)) {
+        if (!button) continue;
+        button.addEventListener("click", () => buildBuilding(building));
+      }
+      launchSmallButton?.addEventListener("click", () => setMissileLaunchMode("small"));
+      launchNukeButton?.addEventListener("click", () => setMissileLaunchMode("nuke"));
+      launchHydrogenButton?.addEventListener("click", () => setMissileLaunchMode("hydrogen"));
+      siloLaunchSmallButton?.addEventListener("click", () => setMissileLaunchMode("small"));
+      siloLaunchNukeButton?.addEventListener("click", () => setMissileLaunchMode("nuke"));
+      siloLaunchHydrogenButton?.addEventListener("click", () => setMissileLaunchMode("hydrogen"));
+      toggleCityBorders?.addEventListener("change", (e) => setOverlayVisibility("cityBorders", e.target.checked));
+      toggleSamRanges?.addEventListener("change", (e) => setOverlayVisibility("samRanges", e.target.checked));
+      toggleBuildingRings?.addEventListener("change", (e) => setOverlayVisibility("buildingRings", e.target.checked));
+      toggleMissileTarget?.addEventListener("change", (e) => setOverlayVisibility("missileTarget", e.target.checked));
     }
-    launchSmallButton?.addEventListener("click", () => setMissileLaunchMode("small"));
-    launchNukeButton?.addEventListener("click", () => setMissileLaunchMode("nuke"));
-    launchHydrogenButton?.addEventListener("click", () => setMissileLaunchMode("hydrogen"));
-    siloLaunchSmallButton?.addEventListener("click", () => setMissileLaunchMode("small"));
-    siloLaunchNukeButton?.addEventListener("click", () => setMissileLaunchMode("nuke"));
-    siloLaunchHydrogenButton?.addEventListener("click", () => setMissileLaunchMode("hydrogen"));
-    toggleCityBorders?.addEventListener("change", (e) => setOverlayVisibility("cityBorders", e.target.checked));
-    toggleSamRanges?.addEventListener("change", (e) => setOverlayVisibility("samRanges", e.target.checked));
-    toggleBuildingRings?.addEventListener("change", (e) => setOverlayVisibility("buildingRings", e.target.checked));
-    toggleMissileTarget?.addEventListener("change", (e) => setOverlayVisibility("missileTarget", e.target.checked));
 
     async function fetchLeaderboard() {
       try {
@@ -1786,7 +1712,9 @@
         nodeInfoArmyEl.textContent = "0";
         nodeInfoDeltaEl.textContent = "0";
         nodeInfoPositionEl.textContent = "-";
-        nodeInfoBuildingEl.textContent = "None";
+        if (FEATURE_BUILDINGS) {
+          nodeInfoBuildingEl.textContent = "None";
+        }
         updateBuildControls(null);
         updateSiloControls(null);
         nodeInfoStatusEl.textContent = "Click a node.";
@@ -1808,8 +1736,10 @@
       nodeInfoArmyEl.textContent = Number(feature.properties?.army || 0).toLocaleString();
       nodeInfoDeltaEl.textContent = formatSignedTickRate(perTick.net);
       nodeInfoPositionEl.textContent = coords ? `${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}` : "-";
-      const building = feature.properties?.building || null;
-      nodeInfoBuildingEl.textContent = building || "None";
+      if (FEATURE_BUILDINGS) {
+        const building = feature.properties?.building || null;
+        nodeInfoBuildingEl.textContent = building || "None";
+      }
       updateBuildControls(feature);
       updateSiloControls(feature);
       const isSelectedNode = String(feature.properties?.id || "") === String(selectedNodeId || "");
@@ -1858,6 +1788,7 @@
     };
 
     function renderBuildingEffectsList() {
+      if (!FEATURE_BUILDINGS) return;
       if (!buildingEffectsListEl) return;
       const html = Object.entries(BUILDING_INFO)
         .map(([name, info]) => `<div><strong>${name}</strong> — ${info.cost.toLocaleString()} gold<br><span style="color:#94a3b8">${info.effect}</span></div>`)
@@ -1866,6 +1797,7 @@
     }
 
     function setBuildButtonTitles() {
+      if (!FEATURE_BUILDINGS) return;
       for (const [name, button] of Object.entries(buildButtons)) {
         if (!button || !BUILDING_INFO[name]) continue;
         const info = BUILDING_INFO[name];
@@ -1874,6 +1806,7 @@
     }
 
     function updateBuildControls(feature) {
+      if (!FEATURE_BUILDINGS) return;
       if (!feature || feature.properties?.ownerState !== "self" || feature.properties?.building) {
         buildControlsEl.classList.add("hidden");
         return;
@@ -1888,6 +1821,7 @@
     }
 
     function updateSiloControls(feature) {
+      if (!FEATURE_BUILDINGS) return;
       if (!feature || feature.properties?.ownerState !== "self" || feature.properties?.building !== "Silo") {
         siloControlsEl.classList.add("hidden");
         return;
@@ -1896,6 +1830,7 @@
     }
 
     async function buildBuilding(building) {
+      if (!FEATURE_BUILDINGS) return;
       if (!sessionToken || !inspectedNodeId) return;
       const button = buildButtons[building];
       if (button) button.disabled = true;
@@ -1918,6 +1853,7 @@
     }
 
     function setMissileLaunchMode(mode) {
+      if (!FEATURE_BUILDINGS) return;
       if (!sessionToken) {
         showToast("Log in to launch missiles.", "error");
         return;
@@ -1931,6 +1867,7 @@
     }
 
     function updateMissileStatus() {
+      if (!FEATURE_BUILDINGS) return;
       if (!missileLaunchMode) {
         missileStatusEl.textContent = "";
         launchSmallButton.classList.remove("primary");
@@ -1967,11 +1904,13 @@
     }
 
     function setOverlayVisibility(key, visible) {
+      if (!FEATURE_BUILDINGS) return;
       overlayVisibility[key] = visible;
       applyOverlayVisibility();
     }
 
     function showMissileTargetMarker(lngLat, radiusKm) {
+      if (!FEATURE_BUILDINGS) return;
       const lon = lngLat.lng;
       const lat = lngLat.lat;
       const points = 64;
@@ -1993,7 +1932,7 @@
     }
 
     async function launchMissileAt(lngLat) {
-      if (!missileLaunchMode || !sessionToken) return;
+      if (!FEATURE_BUILDINGS || !missileLaunchMode || !sessionToken) return;
       const type = missileLaunchMode;
       const radiusKm = { small: 0.3, nuke: 1.0, hydrogen: 3.0 }[type];
       showMissileTargetMarker(lngLat, radiusKm);
@@ -2759,7 +2698,7 @@
     }
 
     async function handleNodeClick(event) {
-      if (missileLaunchMode && event.lngLat) {
+      if (FEATURE_BUILDINGS && missileLaunchMode && event.lngLat) {
         if (Date.now() - lastMissileClickAt < 300) return;
         lastMissileClickAt = Date.now();
         await launchMissileAt(event.lngLat);
@@ -3453,12 +3392,14 @@
       map.addLayer({ id: "selected-node-ring", type: "circle", source: "selected-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 16, 13, 20, 16, 25], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#facc15", "circle-stroke-width": 3.2, "circle-opacity": 1 } });
       map.addLayer({ id: "hover-node-ring", type: "circle", source: "hover-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 15.5, 13, 19.5, 16, 24], "circle-color": "rgba(250, 204, 21, 0.18)", "circle-stroke-color": "#facc15", "circle-stroke-width": 4.2, "circle-opacity": 1 } });
       map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 9, 13, 12, 16, 14], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": false, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": "#000000", "text-halo-color": "rgba(255,255,255,1.0)", "text-halo-width": 2.4 } });
-      map.addLayer({ id: "building-node-rings", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["all", ["has", "building"], ["!=", ["get", "building"], null]], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 14, 13, 18, 16, 23], "circle-color": ["case", ["==", ["get", "building"], "City"], "#fbbf24", ["==", ["get", "building"], "Barracks"], "#ef4444", ["==", ["get", "building"], "Market"], "#22c55e", ["==", ["get", "building"], "Bank"], "#eab308", ["==", ["get", "building"], "Hospital"], "#ffffff", ["==", ["get", "building"], "Bar"], "#a855f7", ["==", ["get", "building"], "Silo"], "#475569", ["==", ["get", "building"], "SAM"], "#3b82f6", "#94a3b8"], "circle-stroke-color": "#0f172a", "circle-stroke-width": 2, "circle-opacity": 0.92 } });
-      map.addLayer({ id: "building-node-labels", type: "symbol", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["all", ["has", "building"], ["!=", ["get", "building"], null]], layout: { "text-field": ["get", "building"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 7, 13, 9, 16, 11], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": false }, paint: { "text-color": "#ffffff", "text-halo-color": "rgba(0,0,0,0.7)", "text-halo-width": 2 } });
-      map.addLayer({ id: "missile-target-fill", type: "fill", source: "missile-target", paint: { "fill-color": "#ef4444", "fill-opacity": 0.25 } });
-      map.addLayer({ id: "missile-target-line", type: "line", source: "missile-target", paint: { "line-color": "#ef4444", "line-width": 2, "line-dasharray": [3, 2] } });
-      map.addLayer({ id: "sam-range-fill", type: "fill", source: "sam-ranges", minzoom: NODE_MIN_ZOOM - 2, paint: { "fill-color": "#f59e0b", "fill-opacity": 0.1 } });
-      map.addLayer({ id: "sam-range-line", type: "line", source: "sam-ranges", minzoom: NODE_MIN_ZOOM - 2, paint: { "line-color": "#f59e0b", "line-width": 1.8, "line-dasharray": [4, 3] } });
+      if (FEATURE_BUILDINGS) {
+        map.addLayer({ id: "building-node-rings", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["all", ["has", "building"], ["!=", ["get", "building"], null]], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 14, 13, 18, 16, 23], "circle-color": ["case", ["==", ["get", "building"], "City"], "#fbbf24", ["==", ["get", "building"], "Barracks"], "#ef4444", ["==", ["get", "building"], "Market"], "#22c55e", ["==", ["get", "building"], "Bank"], "#eab308", ["==", ["get", "building"], "Hospital"], "#ffffff", ["==", ["get", "building"], "Bar"], "#a855f7", ["==", ["get", "building"], "Silo"], "#475569", ["==", ["get", "building"], "SAM"], "#3b82f6", "#94a3b8"], "circle-stroke-color": "#0f172a", "circle-stroke-width": 2, "circle-opacity": 0.92 } });
+        map.addLayer({ id: "building-node-labels", type: "symbol", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["all", ["has", "building"], ["!=", ["get", "building"], null]], layout: { "text-field": ["get", "building"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 7, 13, 9, 16, 11], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": false }, paint: { "text-color": "#ffffff", "text-halo-color": "rgba(0,0,0,0.7)", "text-halo-width": 2 } });
+        map.addLayer({ id: "missile-target-fill", type: "fill", source: "missile-target", paint: { "fill-color": "#ef4444", "fill-opacity": 0.25 } });
+        map.addLayer({ id: "missile-target-line", type: "line", source: "missile-target", paint: { "line-color": "#ef4444", "line-width": 2, "line-dasharray": [3, 2] } });
+        map.addLayer({ id: "sam-range-fill", type: "fill", source: "sam-ranges", minzoom: NODE_MIN_ZOOM - 2, paint: { "fill-color": "#f59e0b", "fill-opacity": 0.1 } });
+        map.addLayer({ id: "sam-range-line", type: "line", source: "sam-ranges", minzoom: NODE_MIN_ZOOM - 2, paint: { "line-color": "#f59e0b", "line-width": 1.8, "line-dasharray": [4, 3] } });
+      }
       applyOverlayVisibility();
 
       map.on("click", "connectable-node-rings", handleNodeClick);
@@ -3474,7 +3415,7 @@
       map.on("mouseenter", "game-node-labels", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "game-node-labels", handleNodeLeave);
       map.on("click", (event) => {
-        if (missileLaunchMode) {
+        if (FEATURE_BUILDINGS && missileLaunchMode) {
           if (Date.now() - lastMissileClickAt < 300) return;
           lastMissileClickAt = Date.now();
           launchMissileAt(event.lngLat);

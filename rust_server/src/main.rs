@@ -42,6 +42,10 @@ const MISSILE_HYDROGEN_RADIUS_KM: f64 = 3.0;
 const SILO_COOLDOWN_MS: i64 = 10 * 60 * 1000;
 const SAM_COOLDOWN_MS: i64 = 12 * 60 * 1000;
 const SAM_RADIUS_KM: f64 = 5.0;
+// Master switch for the buildings/gold-spend/missile feature set. While false,
+// /api/build and /api/launch-missile are gated off; gold still accrues so the
+// feature can be re-enabled without a state migration.
+const BUILDINGS_ENABLED: bool = false;
 const PLAYER_COLORS: &[&str] = &[
     "#c81c1c", "#c8391c", "#c8561c", "#c8721c", "#c88f1c", "#c8ac1c", "#c8c81c", "#acc81c",
     "#8fc81c", "#72c81c", "#56c81c", "#39c81c", "#1cc81c", "#1cc839", "#1cc856", "#1cc872",
@@ -289,6 +293,9 @@ struct GameState {
     nodes: HashMap<String, WorldNode>,
     #[serde(default)]
     attacks: HashMap<String, Attack>,
+    // Per-building cooldowns: node_id -> last-fired ms (Silo/SAM).
+    #[serde(default)]
+    building_cooldowns: HashMap<String, i64>,
 }
 
 impl GameState {
@@ -876,6 +883,7 @@ impl App {
         for node_id in existing_node_ids {
             if !valid_node_ids.contains(&node_id) {
                 data.state.nodes.remove(&node_id);
+                data.state.building_cooldowns.remove(&node_id);
                 modified = true;
             }
         }
@@ -1351,27 +1359,24 @@ impl App {
                 if haversine_km(target_lat, target_lon, sam_coord.lat, sam_coord.lon) > SAM_RADIUS_KM {
                     continue;
                 }
-                let sam_player = match data.state.players.get(&owner_id) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                if now - sam_player.last_sam_fire_at < SAM_COOLDOWN_MS {
+                if now - data.state.building_cooldowns.get(sam_node_id).copied().unwrap_or(0)
+                    < SAM_COOLDOWN_MS
+                {
                     continue;
                 }
                 intercepted = true;
                 interceptor_id = Some(owner_id.clone());
+                interceptor_sam_id = Some(sam_node_id.clone());
                 break 'outer;
             }
         }
 
         if intercepted {
-            if let Some(interceptor_id) = &interceptor_id {
-                if let Some(player) = data.state.players.get_mut(interceptor_id) {
-                    player.last_sam_fire_at = now;
-                }
+            if let Some(sam_node_id) = &interceptor_sam_id {
+                data.state.building_cooldowns.insert(sam_node_id.clone(), now);
             }
+            data.state.building_cooldowns.insert(ready_silo_id.clone(), now);
             let player = data.state.players.get_mut(player_id).unwrap();
-            player.last_silo_fire_at = now;
             player.gold -= cost;
             data.state.version += 1;
             self.save_state_locked(&mut data.state)?;
@@ -3311,9 +3316,32 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 ))
             }
             (&Method::Post, "/api/build") => {
-                Ok(json_response(404, &json!({"error": "building system disabled"})))
+                if !BUILDINGS_ENABLED {
+                    return Ok(json_response(403, &json!({"error": "building system disabled"})));
+                }
+                let body = parse_body_json(&mut request)?;
+                let token = body
+                    .get("token")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Invalid session.".to_string())?;
+                let node_id = body
+                    .get("nodeId")
+                    .and_then(value_to_string)
+                    .ok_or_else(|| "Invalid node.".to_string())?;
+                let building = body
+                    .get("building")
+                    .and_then(Value::as_str)
+                    .and_then(BuildingType::from_str)
+                    .ok_or_else(|| "Unknown building type.".to_string())?;
+                Ok(json_response(
+                    200,
+                    &app.build_building_request(token, &node_id, building)?,
+                ))
             }
             (&Method::Post, "/api/launch-missile") => {
+                if !BUILDINGS_ENABLED {
+                    return Ok(json_response(403, &json!({"error": "building system disabled"})));
+                }
                 let body = parse_body_json(&mut request)?;
                 let token = body
                     .get("token")
