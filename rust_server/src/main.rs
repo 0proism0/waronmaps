@@ -8,11 +8,11 @@ use s2::rect::Rect as S2Rect;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
@@ -119,6 +119,33 @@ struct Coord {
 struct Edge {
     to: String,
     weight: f64,
+}
+
+// Min-heap entry for pathfinding open lists. BinaryHeap is max-first, so the
+// ordering is reversed to pop the lowest score first.
+struct OpenNode {
+    node_id: String,
+    score: f64,
+}
+
+impl PartialEq for OpenNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.total_cmp(&other.score).is_eq()
+    }
+}
+
+impl Eq for OpenNode {}
+
+impl PartialOrd for OpenNode {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OpenNode {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.score.total_cmp(&self.score)
+    }
 }
 
 #[derive(Default)]
@@ -1459,16 +1486,22 @@ impl App {
         }
 
         let start = from_node_id.to_string();
-        let mut open = vec![(start.clone(), 0.0_f64)];
+        let mut open = BinaryHeap::<OpenNode>::new();
+        open.push(OpenNode {
+            node_id: start.clone(),
+            score: 0.0,
+        });
         let mut dist = HashMap::<String, f64>::new();
         let mut prev = HashMap::<String, String>::new();
         let mut targets = Vec::<String>::new();
         let mut seen_targets = HashSet::<String>::new();
         dist.insert(start.clone(), 0.0);
 
-        while !open.is_empty() {
-            open.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            let (current, current_score) = open.remove(0);
+        while let Some(OpenNode {
+            node_id: current,
+            score: current_score,
+        }) = open.pop()
+        {
             let best_score = *dist.get(&current).unwrap_or(&f64::INFINITY);
             if current_score > best_score {
                 continue;
@@ -1493,24 +1526,23 @@ impl App {
                 continue;
             }
 
-            let neighbors = data
-                .node_repo
-                .adjacency
-                .get(&current)
-                .cloned()
-                .unwrap_or_default();
-            for edge in neighbors {
-                if edge.to == start {
-                    continue;
+            if let Some(neighbors) = data.node_repo.adjacency.get(&current) {
+                for edge in neighbors {
+                    if edge.to == start {
+                        continue;
+                    }
+                    let tentative = current_score + edge.weight;
+                    let known = *dist.get(&edge.to).unwrap_or(&f64::INFINITY);
+                    if tentative >= known {
+                        continue;
+                    }
+                    dist.insert(edge.to.clone(), tentative);
+                    prev.insert(edge.to.clone(), current.clone());
+                    open.push(OpenNode {
+                        node_id: edge.to.clone(),
+                        score: tentative,
+                    });
                 }
-                let tentative = current_score + edge.weight;
-                let known = *dist.get(&edge.to).unwrap_or(&f64::INFINITY);
-                if tentative >= known {
-                    continue;
-                }
-                dist.insert(edge.to.clone(), tentative);
-                prev.insert(edge.to.clone(), current.clone());
-                open.push((edge.to, tentative));
             }
         }
 
@@ -1838,15 +1870,20 @@ impl App {
             .copied()
             .ok_or_else(|| "Missing road coordinates for one of the nodes.".to_string())?;
 
-        let mut open = vec![(start.clone(), 0.0_f64)];
+        let mut open = BinaryHeap::<OpenNode>::new();
+        open.push(OpenNode {
+            node_id: start.clone(),
+            score: 0.0,
+        });
         let mut g_score = HashMap::<String, f64>::new();
         let mut prev = HashMap::<String, String>::new();
         let mut visited = HashSet::<String>::new();
         g_score.insert(start, 0.0);
 
-        while !open.is_empty() {
-            open.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            let (current, _) = open.remove(0);
+        while let Some(OpenNode {
+            node_id: current, ..
+        }) = open.pop()
+        {
             if current == goal {
                 let path = self.reconstruct_path_locked(data, &prev, &goal);
                 data.node_repo.route_cache.insert(cache_key, path.clone());
@@ -1855,29 +1892,28 @@ impl App {
             if !visited.insert(current.clone()) {
                 continue;
             }
-            let neighbors = data
-                .node_repo
-                .adjacency
-                .get(&current)
-                .cloned()
-                .unwrap_or_default();
-            for edge in neighbors {
-                let current_score = *g_score.get(&current).unwrap_or(&f64::INFINITY);
-                let best_neighbor_score = *g_score.get(&edge.to).unwrap_or(&f64::INFINITY);
-                let tentative = current_score + edge.weight;
-                if tentative >= best_neighbor_score {
-                    continue;
+            let current_score = *g_score.get(&current).unwrap_or(&f64::INFINITY);
+            if let Some(neighbors) = data.node_repo.adjacency.get(&current) {
+                for edge in neighbors {
+                    let best_neighbor_score = *g_score.get(&edge.to).unwrap_or(&f64::INFINITY);
+                    let tentative = current_score + edge.weight;
+                    if tentative >= best_neighbor_score {
+                        continue;
+                    }
+                    prev.insert(edge.to.clone(), current.clone());
+                    g_score.insert(edge.to.clone(), tentative);
+                    let heuristic = data
+                        .node_repo
+                        .coords_by_id
+                        .get(&edge.to)
+                        .copied()
+                        .map(|coord| haversine_km(coord.lat, coord.lon, goal_coord.lat, goal_coord.lon))
+                        .unwrap_or(0.0);
+                    open.push(OpenNode {
+                        node_id: edge.to.clone(),
+                        score: tentative + heuristic,
+                    });
                 }
-                prev.insert(edge.to.clone(), current.clone());
-                g_score.insert(edge.to.clone(), tentative);
-                let heuristic = data
-                    .node_repo
-                    .coords_by_id
-                    .get(&edge.to)
-                    .copied()
-                    .map(|coord| haversine_km(coord.lat, coord.lon, goal_coord.lat, goal_coord.lon))
-                    .unwrap_or(0.0);
-                open.push((edge.to, tentative + heuristic));
             }
         }
 
