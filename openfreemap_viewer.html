@@ -3127,25 +3127,38 @@
       if (message.type === "authResult") {
         wsConnected = message.success === true;
         if (!wsConnected) {
-          disconnectWebSocket();
+          handleSessionExpired("WebSocket authentication failed. Please log in again.");
         }
       } else if (message.type === "world-update") {
         const now = Date.now();
         if (now - lastWorldUpdateRefreshAt >= WORLD_UPDATE_THROTTLE_MS) {
           lastWorldUpdateRefreshAt = now;
           void refreshGameState();
-          clearNodeTileResponseCache();
           scheduleVisibleTileRefresh(100, false);
         }
       }
     }
 
+    function handleSessionExpired(message) {
+      sessionToken = "";
+      disconnectWebSocket();
+      currentPlayerId = null;
+      clearNodeTileResponseCache();
+      autoFocusedPlayerId = null;
+      lastOwnedFeatures = [];
+      selectedNodeId = null;
+      selectedNodeFeature = null;
+      setAttackFeatures([]);
+      clearConnectableTargets();
+      localStorage.removeItem(SESSION_KEY);
+      authSummaryEl.textContent = message;
+      showMainPanel(true);
+      showToast(`Session cleared: ${message}`, "error");
+    }
+
     async function refreshGameState() {
       try {
-        const query = sessionToken
-          ? `?token=${encodeURIComponent(sessionToken)}&view=summary`
-          : "?view=summary";
-        const state = await fetchJson(`${GAME_STATE_URL}${query}`, { cache: "no-store" });
+        const state = await fetchJson(`${GAME_STATE_URL}?view=summary`, { cache: "no-store" });
         currentPlayerId = state.player?.id || null;
         const ownedFeatures = state.ownedNodes?.features || [];
         lastOwnedFeatures = ownedFeatures;

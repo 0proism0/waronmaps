@@ -931,33 +931,87 @@ impl App {
         }
     }
 
-    fn player_city_node_ids_locked(&self, data: &AppData, player_id: &str) -> HashSet<String> {
-        let city_coords: Vec<Coord> = data
+    // Rebuild the node_id -> player_id city-membership map: a node gets an
+    // entry when it lies within CITY_RADIUS_KM of a City building. When radii
+    // of different players' cities overlap, the first matching city wins.
+    // Cost is O(cities x repo nodes), paid only when the dirty flag is set.
+    fn rebuild_city_membership_locked(&self, data: &mut AppData) {
+        let cities: Vec<(String, Coord)> = data
             .state
             .nodes
             .iter()
             .filter(|(_, node)| {
-                node.owner_id.as_deref() == Some(player_id)
-                    && node.building == Some(BuildingType::City)
+                node.owner_id.is_some() && node.building == Some(BuildingType::City)
             })
-            .filter_map(|(id, _)| data.node_repo.coords_by_id.get(id).cloned())
+            .filter_map(|(node_id, node)| {
+                data.node_repo
+                    .coords_by_id
+                    .get(node_id)
+                    .map(|coord| (node.owner_id.clone().unwrap(), *coord))
+            })
             .collect();
-        if city_coords.is_empty() {
-            return HashSet::new();
-        }
-        data.node_repo
-            .nodes_by_id
-            .values()
-            .filter_map(|node| {
-                for city_coord in &city_coords {
+        let mut membership = HashMap::new();
+        if !cities.is_empty() {
+            for node in data.node_repo.nodes_by_id.values() {
+                for (owner_id, city_coord) in &cities {
                     if haversine_km(node.lat, node.lon, city_coord.lat, city_coord.lon)
                         <= CITY_RADIUS_KM
                     {
-                        return Some(node.id.clone());
+                        membership.insert(node.id.clone(), owner_id.clone());
+                        break;
                     }
                 }
-                None
-            })
+            }
+        }
+        data.city_membership = membership;
+        data.city_membership_graph_version = data.node_repo.graph_version;
+        data.city_membership_dirty = false;
+    }
+
+    fn ensure_city_membership_locked(&self, data: &mut AppData) {
+        if data.city_membership_dirty
+            || data.city_membership_graph_version != data.node_repo.graph_version
+        {
+            self.rebuild_city_membership_locked(data);
+        }
+    }
+
+    // Rebuild the player_id -> owned node ids index in one pass over world
+    // nodes, preserving state.nodes iteration order so economy math sees the
+    // same node sequence as a full scan would.
+    fn rebuild_player_nodes_locked(&self, data: &mut AppData) {
+        let mut player_nodes: HashMap<String, Vec<String>> = HashMap::new();
+        for (node_id, node) in data.state.nodes.iter() {
+            if let Some(owner_id) = node.owner_id.as_ref() {
+                player_nodes
+                    .entry(owner_id.clone())
+                    .or_default()
+                    .push(node_id.clone());
+            }
+        }
+        data.player_nodes = player_nodes;
+        data.player_nodes_dirty = false;
+    }
+
+    fn ensure_player_nodes_locked(&self, data: &mut AppData) {
+        if data.player_nodes_dirty {
+            self.rebuild_player_nodes_locked(data);
+        }
+    }
+
+    // Drop sessions past their expiry so state.json does not grow forever.
+    // Returns true when at least one session was removed.
+    fn purge_expired_sessions_locked(&self, data: &mut AppData) -> bool {
+        let now = now_ms();
+        let before = data.state.sessions.len();
+        data.state.sessions.retain(|_, session| session.expires_at > now);
+        data.state.sessions.len() != before
+    }
+
+    fn player_city_node_ids_locked(&self, data: &AppData, player_id: &str) -> HashSet<String> {
+        data.city_membership
+            .iter()
+            .filter_map(|(node_id, owner_id)| (owner_id == player_id).then(|| node_id.clone()))
             .collect()
     }
 
@@ -3051,8 +3105,7 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 Ok(json_response(200, &app.login_player(username, password)?))
             }
             (&Method::Get, "/api/game-state") => {
-                let token = extract_bearer_token(&request)
-                    .or_else(|| query.get("token").cloned());
+                let token = extract_bearer_token(&request);
                 let include_nodes = query.get("view").map(String::as_str) != Some("summary");
                 Ok(json_response(200, &app.game_state_response(token.as_deref(), include_nodes)?))
             }
