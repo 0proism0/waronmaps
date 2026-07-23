@@ -427,6 +427,7 @@
     let autoFocusedPlayerId = null;
     let visibleTileRefreshVersion = 0;
     let lastOwnedFeatures = [];
+    let lastCityFeaturesJson = "";
     let stateBoundaryCollection = null;
     let currentGenerationFeatures = [];
     let renderedNodeFeatures = [];
@@ -461,11 +462,12 @@
     let authRequestInFlight = false;
     let currentAttackFeatures = [];
     let cachedEffectiveFlow = null;
-    let cachedEffectiveFlowKey = "";
+    let cachedEffectiveFlowGeneration = -1;
     let cachedProjectedPaths = new Map();
-    let cachedProjectedPathsKey = "";
     let cachedProjectedPoints = new Map();
-    let cachedProjectedPointsKey = "";
+    let cachedProjectedPointsGeneration = -1;
+    let renderStateGeneration = 0;
+    let cameraGeneration = 0;
     let selectedNodeTargets = [];
     let selectedNodeTargetsRequestVersion = 0;
     let attackArrowAnimationFrame = 0;
@@ -693,34 +695,17 @@
         return attackFeatureKey(left).localeCompare(attackFeatureKey(right));
       });
     }
-    function effectiveFlowCacheKey() {
-      const nodeKey = renderedNodeFeatures
-        .map((feature) => `${feature?.properties?.id || ""}|${feature?.properties?.army || 0}|${feature?.properties?.ownerState || ""}`)
-        .join(",");
-      const attackKey = currentAttackFeatures
-        .map((feature) => `${feature?.properties?.fromNodeId || ""}->${feature?.properties?.toNodeId || ""}|${feature?.properties?.sendPerTick || 0}|${feature?.properties?.mode || ""}`)
-        .join(",");
-      return `${nodeKey}::${attackKey}`;
-    }
     function getCachedEffectiveFlow() {
-      const key = effectiveFlowCacheKey();
-      if (cachedEffectiveFlow && cachedEffectiveFlowKey === key) {
+      if (cachedEffectiveFlow && cachedEffectiveFlowGeneration === renderStateGeneration) {
         return cachedEffectiveFlow;
       }
       const flow = computeEffectiveFlowByAttackKey();
       cachedEffectiveFlow = flow;
-      cachedEffectiveFlowKey = key;
+      cachedEffectiveFlowGeneration = renderStateGeneration;
       return flow;
     }
     function projectedPathsCacheKey() {
-      const transform = map ? map.transform : null;
-      const camera = transform
-        ? `${transform.zoom.toFixed(3)}|${transform.bearing.toFixed(2)}|${transform.pitch.toFixed(2)}|${transform.center.lng.toFixed(5)}|${transform.center.lat.toFixed(5)}`
-        : "";
-      const attackKey = currentAttackFeatures
-        .map((feature) => `${feature?.properties?.fromNodeId || ""}->${feature?.properties?.toNodeId || ""}|${feature?.properties?.id || ""}`)
-        .join(",");
-      return `${camera}::${attackKey}`;
+      return `${cameraGeneration}|${renderStateGeneration}`;
     }
     function getProjectedPath(coords, featureId) {
       const key = `${projectedPathsCacheKey()}|${featureId}`;
@@ -738,11 +723,10 @@
     }
     function invalidateAttackCaches() {
       cachedEffectiveFlow = null;
-      cachedEffectiveFlowKey = "";
+      cachedEffectiveFlowGeneration = -1;
       cachedProjectedPaths.clear();
-      cachedProjectedPathsKey = "";
       cachedProjectedPoints.clear();
-      cachedProjectedPointsKey = "";
+      cachedProjectedPointsGeneration = -1;
     }
 
     function computeEffectiveFlowByAttackKey() {
@@ -1218,6 +1202,9 @@
         String(props.ownerId || ""),
         String(props.ownerUsername || ""),
         Boolean(props.canAttack),
+        String(props.building || ""),
+        String(props.displayName || ""),
+        Number(props.productionRate || 0),
       ].join("|");
     }
     function visibleNodeFeaturesEqual(currentMap, nextMap) {
@@ -1962,6 +1949,7 @@
     }
 
     function applyOverlayVisibility() {
+      if (!FEATURE_BUILDINGS) return;
       const layers = {
         cityBorders: ["city-borders-fill", "city-borders-line"],
         samRanges: ["sam-range-fill", "sam-range-line"],
@@ -2869,10 +2857,13 @@
         return feature;
       });
       renderedNodeFeatures = displayFeatures;
+      renderStateGeneration += 1;
       syncInspectedNodeFromRenderedFeatures(displayFeatures);
       syncSelectionFromRenderedFeatures(displayFeatures);
       map.getSource("game-nodes").setData({ type: "FeatureCollection", features: displayFeatures });
-      updateSamRangeFeatures(displayFeatures);
+      if (FEATURE_BUILDINGS) {
+        updateSamRangeFeatures(displayFeatures);
+      }
       renderedNodeCountEl.textContent = displayFeatures.length.toLocaleString();
       if (!selectedNodeFeature) {
         clearConnectableTargets();
@@ -2893,26 +2884,38 @@
       return coords;
     }
 
+    let lastSamRangeKey = "";
+    let lastSamRangeJson = "";
     function updateSamRangeFeatures(features) {
       const SAM_RADIUS_KM = 5.0;
-      const samFeatures = (features || [])
+      const samNodes = (features || [])
         .filter((feature) => feature.properties?.building === "SAM")
         .map((feature) => {
           const coords = feature.geometry?.coordinates;
-          const lngLat = coords ? { lng: coords[0], lat: coords[1] } : null;
-          if (!lngLat) return null;
-          return {
-            type: "Feature",
-            geometry: {
-              type: "Polygon",
-              coordinates: [makeCirclePolygon(lngLat, SAM_RADIUS_KM)],
-            },
-            properties: {
-              nodeId: String(feature.properties?.id || ""),
-            },
-          };
+          return coords ? { id: String(feature.properties?.id || ""), coords } : null;
         })
-        .filter(Boolean);
+        .filter(Boolean)
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const samRangeKey = samNodes.map((node) => `${node.id}:${node.coords[1]},${node.coords[0]}:${SAM_RADIUS_KM}`).join("|");
+      if (samRangeKey === lastSamRangeKey) {
+        return;
+      }
+      lastSamRangeKey = samRangeKey;
+      const samFeatures = samNodes.map((node) => ({
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [makeCirclePolygon({ lng: node.coords[0], lat: node.coords[1] }, SAM_RADIUS_KM)],
+        },
+        properties: {
+          nodeId: node.id,
+        },
+      }));
+      const samRangeJson = JSON.stringify(samFeatures);
+      if (samRangeJson === lastSamRangeJson) {
+        return;
+      }
+      lastSamRangeJson = samRangeJson;
       map.getSource("sam-ranges")?.setData({ type: "FeatureCollection", features: samFeatures });
     }
 
@@ -2923,6 +2926,7 @@
         activeVisibleTileRequestKey = "";
         renderedNodeFeatures = [];
         renderedNodeFeatureMap.clear();
+        renderStateGeneration += 1;
         inspectedNodeId = null;
         updateNodeInfo(null);
         map.getSource("game-nodes").setData(emptyFeatureCollection());
@@ -3154,10 +3158,16 @@
           : (selectedStartNodeId
             ? `Starting node selected: ${selectedStartNodeId}. Enter a username and password, then Register.`
             : "Register or log in. Click a neutral node on the map to choose where to start.");
-        goldTextEl.textContent = (state.player?.gold || 0).toLocaleString();
-        incomeTextEl.textContent = (state.player?.goldIncomePerSec || 0).toLocaleString();
+        if (FEATURE_BUILDINGS) {
+          goldTextEl.textContent = (state.player?.gold || 0).toLocaleString();
+          incomeTextEl.textContent = (state.player?.goldIncomePerSec || 0).toLocaleString();
+        }
         activeAttackCountEl.textContent = (state.attacks?.features || []).length.toLocaleString();
-        map.getSource("city-borders")?.setData(state.cityFeatures || emptyFeatureCollection());
+        const cityFeaturesJson = JSON.stringify(state.cityFeatures || emptyFeatureCollection());
+        if (cityFeaturesJson !== lastCityFeaturesJson) {
+          lastCityFeaturesJson = cityFeaturesJson;
+          map.getSource("city-borders")?.setData(state.cityFeatures || emptyFeatureCollection());
+        }
         fetchLeaderboard();
         if (state.player && ownedFeatures.length) {
           if (!panelAutoHiddenForSession) {
