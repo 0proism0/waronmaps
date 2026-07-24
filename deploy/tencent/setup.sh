@@ -62,14 +62,14 @@ apt-get install -y \
 
 if ! command -v rustc >/dev/null 2>&1; then
   echo "==> Installing Rust..."
-  sudo -u "$RUN_USER" bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
+  sudo -u "$RUN_USER" bash -lc 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
 fi
 
 # Make cargo available for the rest of the script
 export PATH="/home/$RUN_USER/.cargo/bin:$PATH"
 
 echo "==> Building Rust server..."
-sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && cargo build --release --manifest-path rust_server/Cargo.toml"
+sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && cargo build --release --manifest-path rust_server/Cargo.toml"
 
 echo "==> Setting up systemd service..."
 cp "$ROOT_DIR/deploy/tencent/waronmaps.service" /etc/systemd/system/waronmaps.service
@@ -80,11 +80,11 @@ systemctl enable waronmaps
 
 echo "==> Preparing node data (skip if already present)..."
 if [[ ! -f "$INTERSECTIONS_CSV" ]]; then
-  sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+  sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
   echo "    Fetched OSM road data."
 fi
-sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && '$GENERATE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
-sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && '$PREPARE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && '$GENERATE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && '$PREPARE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
 
 echo "==> Starting game server..."
 systemctl restart waronmaps
