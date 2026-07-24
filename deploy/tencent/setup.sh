@@ -8,6 +8,8 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+RUN_USER="${SUDO_USER:-ubuntu}"
+
 ensure_swap() {
   local total_mem_kb total_mem_gb swap_total_kb swap_gb
   total_mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)
@@ -49,39 +51,40 @@ PREPARE_BIN="$ROOT_DIR/rust_server/target/release/prepare_region_cache"
 INTERSECTIONS_CSV="$ROOT_DIR/local_node_store/northern_new_england/intersections.csv"
 
 mkdir -p "$RUNTIME_DIR"
+chown "$RUN_USER:$RUN_USER" "$RUNTIME_DIR"
 
 echo "==> Installing system packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
   curl git build-essential pkg-config libssl-dev \
-  nginx certbot python3-certbot-nginx
+  nginx certbot python3-certbot-nginx sudo
 
 if ! command -v rustc >/dev/null 2>&1; then
   echo "==> Installing Rust..."
-  su - "${SUDO_USER:-ubuntu}" -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
+  sudo -u "$RUN_USER" bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
 fi
 
 # Make cargo available for the rest of the script
-export PATH="/home/${SUDO_USER:-ubuntu}/.cargo/bin:$PATH"
+export PATH="/home/$RUN_USER/.cargo/bin:$PATH"
 
 echo "==> Building Rust server..."
-su - "${SUDO_USER:-ubuntu}" -c "cd '$ROOT_DIR' && cargo build --release --manifest-path rust_server/Cargo.toml"
+sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && cargo build --release --manifest-path rust_server/Cargo.toml"
 
 echo "==> Setting up systemd service..."
 cp "$ROOT_DIR/deploy/tencent/waronmaps.service" /etc/systemd/system/waronmaps.service
 sed -i "s|__ROOT_DIR__|$ROOT_DIR|g" /etc/systemd/system/waronmaps.service
-sed -i "s|__USER__|${SUDO_USER:-ubuntu}|g" /etc/systemd/system/waronmaps.service
+sed -i "s|__USER__|$RUN_USER|g" /etc/systemd/system/waronmaps.service
 systemctl daemon-reload
 systemctl enable waronmaps
 
 echo "==> Preparing node data (skip if already present)..."
 if [[ ! -f "$INTERSECTIONS_CSV" ]]; then
-  su - "${SUDO_USER:-ubuntu}" -c "cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+  sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
   echo "    Fetched OSM road data."
 fi
-su - "${SUDO_USER:-ubuntu}" -c "cd '$ROOT_DIR' && '$GENERATE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
-su - "${SUDO_USER:-ubuntu}" -c "cd '$ROOT_DIR' && '$PREPARE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && '$GENERATE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+sudo -u "$RUN_USER" bash -c "cd '$ROOT_DIR' && '$PREPARE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
 
 echo "==> Starting game server..."
 systemctl restart waronmaps
