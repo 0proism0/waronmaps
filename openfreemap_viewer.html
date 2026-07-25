@@ -2603,11 +2603,6 @@
       loadingScreenProgressEl.classList.remove("indeterminate");
       loadingScreenProgressEl.style.width = `${percent}%`;
       setStatus(`Build progress: ${label}`);
-      map.getSource("generation-target")?.setData(
-        isComplete
-          ? emptyFeatureCollection()
-          : { type: "FeatureCollection", features: currentGenerationFeatures }
-      );
       try {
         localStorage.setItem(LAST_BUILD_STATUS_KEY, JSON.stringify(buildStatus));
       } catch {}
@@ -3427,6 +3422,7 @@
 
       map.addLayer({ id: "city-borders-fill", type: "fill", source: "city-borders", minzoom: NODE_MIN_ZOOM - 2, paint: { "fill-color": ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"], "fill-opacity": 0.12 } });
       map.addLayer({ id: "city-borders-line", type: "line", source: "city-borders", minzoom: NODE_MIN_ZOOM - 2, paint: { "line-color": ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"], "line-width": 2, "line-dasharray": [4, 3] } });
+      map.addLayer({ id: "playable-boundary", type: "line", source: "generation-target", paint: { "line-color": "#ef4444", "line-width": 4, "line-opacity": 1 } });
       map.addLayer({ id: "connectable-node-rings", type: "circle", source: "connectable-nodes", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 12, 13, 15, 16, 18], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "rgba(0,0,0,0)", "circle-stroke-width": 0, "circle-opacity": 0 } });
       map.addLayer({ id: "game-node-dots", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, maxzoom: 11.5, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 2, 11.5, 5], "circle-stroke-color": "#000000", "circle-stroke-width": 1, "circle-opacity": 0.95 } });
       map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: 11.5, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], 11.5, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#000000", "circle-stroke-width": 1.5, "circle-opacity": 0.96 } });
