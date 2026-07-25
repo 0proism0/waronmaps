@@ -96,9 +96,13 @@
     .toast.success { border-left: 4px solid #22c55e; }
     .toast.error { border-left: 4px solid #ef4444; }
     .toast.info { border-left: 4px solid #3b82f6; }
-    .leaderboard-panel { position: absolute; top: 86px; right: 16px; z-index: 3; width: min(280px, calc(100vw - 32px)); max-height: min(380px, calc(100vh - 160px)); overflow-y: auto; padding: 14px 16px; color: #f8fafc; background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(14px); box-shadow: 0 20px 50px rgba(2, 6, 23, 0.55); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 18px; }
+    .leaderboard-panel { position: absolute; top: 16px; right: 16px; z-index: 3; width: min(280px, calc(100vw - 32px)); max-height: min(380px, calc(100vh - 160px)); overflow-y: auto; padding: 14px 16px; color: #f8fafc; background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(14px); box-shadow: 0 20px 50px rgba(2, 6, 23, 0.55); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 18px; }
     .leaderboard-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: 14px; font-weight: 800; color: #e2e8f0; }
     .leaderboard-panel-header button { padding: 5px 10px; font-size: 12px; }
+    .auth-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: calc(100vw - 32px); padding: 10px 14px; color: #f8fafc; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(10px); box-shadow: 0 10px 24px rgba(2, 6, 23, 0.35); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 999px; }
+    .auth-bar input { width: 130px; margin: 0; }
+    .auth-bar button { padding: 7px 14px; }
+    .auth-summary { color: #cbd5e1; font-size: 13px; white-space: nowrap; }
     .tutorial-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 23, 0.75); backdrop-filter: blur(4px); opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease; }
     .tutorial-overlay.show { opacity: 1; visibility: visible; }
     .tutorial-card { width: min(420px, calc(100vw - 32px)); background: rgba(15, 23, 42, 0.95); border-radius: 20px; padding: 24px; box-shadow: 0 24px 60px rgba(2, 6, 23, 0.6); border: 1px solid rgba(148, 163, 184, 0.14); }
@@ -129,6 +133,14 @@
   </div>
   <div id="map"></div>
   <canvas id="connectionCanvas" class="connection-canvas"></canvas>
+  <div class="auth-bar" id="authBar">
+    <input id="usernameInput" placeholder="username" autocomplete="username">
+    <input id="passwordInput" type="password" placeholder="password" autocomplete="current-password">
+    <button id="registerButton" type="button">Register</button>
+    <button id="loginButton" type="button" class="secondary">Login</button>
+    <button id="guestButton" type="button" class="secondary">Play as Guest</button>
+    <button id="logoutButton" type="button" class="secondary">Logout</button>
+  </div>
   <div class="overlay panel" id="panel">
     <div class="panel-header">
       <h1 id="panelTitle">War on Map</h1>
@@ -138,14 +150,6 @@
       <p class="panel-subtitle">White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.</p>
       <div class="section">
         <div id="authSummary" class="status">Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.</div>
-        <input id="usernameInput" placeholder="username" autocomplete="username">
-        <input id="passwordInput" type="password" placeholder="password" autocomplete="current-password">
-        <div class="actions">
-          <button id="registerButton" type="button">Register</button>
-          <button id="loginButton" type="button" class="secondary">Login</button>
-          <button id="guestButton" type="button" class="secondary">Play as Guest</button>
-          <button id="logoutButton" type="button" class="secondary">Logout</button>
-        </div>
       </div>
       <div class="section">
         <div class="section-title">📊 Live Stats</div>
@@ -278,11 +282,11 @@
     const DASH_LEN = 8;
     const GAP_LEN = 10;
     const DASH_CYCLE_LEN = DASH_LEN + GAP_LEN;
-    const NODE_MIN_ZOOM = 11.5;
+    const NODE_MIN_ZOOM = 8.5;
     const NODE_DATA_ZOOM_OFFSET = 2;
-    const NODE_DATA_MIN_ZOOM = 12;
+    const NODE_DATA_MIN_ZOOM = 10;
     const NODE_DATA_MAX_ZOOM = 14;
-    const MAX_VISIBLE_NODE_TILES = 16;
+    const MAX_VISIBLE_NODE_TILES = 32;
     const VISIBLE_TILE_REFRESH_COOLDOWN_MS = 1000;
     const NODE_TILE_CACHE_TTL_MS = 5 * 60 * 1000;
     const ZOOM_IN_MESSAGE = "Please zoom in to see nodes.";
@@ -1993,8 +1997,8 @@
     function updateAuthSummaryForGuest() {
       if (sessionToken) return;
       authSummaryEl.textContent = selectedStartNodeId
-        ? `Starting node selected: ${selectedStartNodeId}. Enter a username and password, then Register.`
-        : "Register or log in. Click a neutral node on the map to choose where to start.";
+        ? `Starting node selected: ${selectedStartNodeId}. Register, log in, or click Play as Guest.`
+        : "Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.";
     }
 
     async function updateSelectedRouteRate() {
@@ -3100,8 +3104,8 @@
         authSummaryEl.textContent = state.player
           ? `Logged in as ${state.player.username}. You own ${ownedFeatures.length} green nodes.`
           : (selectedStartNodeId
-            ? `Starting node selected: ${selectedStartNodeId}. Enter a username and password, then Register.`
-            : "Register or log in. Click a neutral node on the map to choose where to start.");
+            ? `Starting node selected: ${selectedStartNodeId}. Register, log in, or click Play as Guest.`
+            : "Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.");
         if (FEATURE_BUILDINGS) {
           goldTextEl.textContent = (state.player?.gold || 0).toLocaleString();
           incomeTextEl.textContent = (state.player?.goldIncomePerSec || 0).toLocaleString();
@@ -3322,7 +3326,7 @@
       lastOwnedFeatures = [];
       localStorage.removeItem(SESSION_KEY);
       clearNodeTileResponseCache();
-      authSummaryEl.textContent = "Register or log in. Click a neutral node on the map to choose where to start.";
+      authSummaryEl.textContent = "Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.";
       selectedNodeId = null;
       selectedNodeFeature = null;
       selectedStartNodeId = null;
@@ -3400,7 +3404,7 @@
     });
 
     function initializeMap() {
-      map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/liberty", center: [-70.5, 43.8], zoom: 11.8 });
+      map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/liberty", center: [-70.5, 43.8], zoom: 11.8, scrollZoom: { speed: 1.5 } });
       map.on("move", () => { cameraGeneration += 1; });
       map.addControl(new maplibregl.NavigationControl(), "top-right");
       map.on("load", async () => { try {
@@ -3433,11 +3437,12 @@
       map.addLayer({ id: "city-borders-fill", type: "fill", source: "city-borders", minzoom: NODE_MIN_ZOOM - 2, paint: { "fill-color": ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"], "fill-opacity": 0.12 } });
       map.addLayer({ id: "city-borders-line", type: "line", source: "city-borders", minzoom: NODE_MIN_ZOOM - 2, paint: { "line-color": ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"], "line-width": 2, "line-dasharray": [4, 3] } });
       map.addLayer({ id: "connectable-node-rings", type: "circle", source: "connectable-nodes", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 12, 13, 15, 16, 18], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "rgba(0,0,0,0)", "circle-stroke-width": 0, "circle-opacity": 0 } });
-      map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#000000", "circle-stroke-width": 1.5, "circle-opacity": 0.96 } });
+      map.addLayer({ id: "game-node-dots", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, maxzoom: 11.5, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 1.5, 11.5, 4], "circle-stroke-width": 0, "circle-opacity": 0.9 } });
+      map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: 11.5, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], 11.5, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#000000", "circle-stroke-width": 1.5, "circle-opacity": 0.96 } });
       map.addLayer({ id: "self-node-ring", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["==", ["get", "ownerState"], "self"], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 13, 13, 17, 16, 21], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#22c55e", "circle-stroke-width": 2.2, "circle-opacity": 0.85 } });
       map.addLayer({ id: "selected-node-ring", type: "circle", source: "selected-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 16, 13, 20, 16, 25], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#facc15", "circle-stroke-width": 3.2, "circle-opacity": 1 } });
       map.addLayer({ id: "hover-node-ring", type: "circle", source: "hover-node", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 15.5, 13, 19.5, 16, 24], "circle-color": "rgba(250, 204, 21, 0.18)", "circle-stroke-color": "#facc15", "circle-stroke-width": 4.2, "circle-opacity": 1 } });
-      map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: NODE_MIN_ZOOM, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 9, 13, 12, 16, 14], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": false, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": "#000000", "text-halo-color": "rgba(255,255,255,1.0)", "text-halo-width": 2.4 } });
+      map.addLayer({ id: "game-node-labels", type: "symbol", source: "game-nodes", minzoom: 11.5, layout: { "visibility": HIDE_NODE_INFORMATION_TEST ? "none" : "visible", "text-field": ["get", "armyLabel"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], 11.5, 9, 13, 12, 16, 14], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": false, "symbol-sort-key": ["get", "army"] }, paint: { "text-color": "#000000", "text-halo-color": "rgba(255,255,255,1.0)", "text-halo-width": 2.4 } });
       if (FEATURE_BUILDINGS) {
         map.addLayer({ id: "building-node-rings", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["all", ["has", "building"], ["!=", ["get", "building"], null]], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 14, 13, 18, 16, 23], "circle-color": ["case", ["==", ["get", "building"], "City"], "#fbbf24", ["==", ["get", "building"], "Barracks"], "#ef4444", ["==", ["get", "building"], "Market"], "#22c55e", ["==", ["get", "building"], "Bank"], "#eab308", ["==", ["get", "building"], "Hospital"], "#ffffff", ["==", ["get", "building"], "Bar"], "#a855f7", ["==", ["get", "building"], "Silo"], "#475569", ["==", ["get", "building"], "SAM"], "#3b82f6", "#94a3b8"], "circle-stroke-color": "#0f172a", "circle-stroke-width": 2, "circle-opacity": 0.92 } });
         map.addLayer({ id: "building-node-labels", type: "symbol", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["all", ["has", "building"], ["!=", ["get", "building"], null]], layout: { "text-field": ["get", "building"], "text-font": ["Noto Sans Bold"], "text-size": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 7, 13, 9, 16, 11], "text-allow-overlap": true, "text-ignore-placement": true, "text-optional": false }, paint: { "text-color": "#ffffff", "text-halo-color": "rgba(0,0,0,0.7)", "text-halo-width": 2 } });
