@@ -272,6 +272,10 @@ struct Attack {
     path: Vec<[f64; 2]>,
     #[serde(default = "default_send_per_tick")]
     send_per_tick: i64,
+    #[serde(default = "default_send_mode")]
+    send_mode: String,
+    #[serde(default = "default_send_percent")]
+    send_percent: i64,
     created_at: i64,
 }
 
@@ -925,34 +929,6 @@ impl App {
             data.node_repo.adjacency.values().map(|edges| edges.len()).sum::<usize>()
         );
         Ok(())
-    }
-
-    fn sorted_neutral_nodes_locked(&self, data: &mut AppData) -> Result<Vec<RepoNode>, String> {
-        self.sync_world_nodes_locked(data)?;
-        Ok(data
-            .node_repo
-            .nodes_by_id
-            .values()
-            .filter(|node| data.state.nodes.get(&node.id).map(|entry| entry.owner_id.is_none()).unwrap_or(false))
-            .cloned()
-            .collect())
-    }
-
-    fn choose_start_nodes_locked(&self, data: &mut AppData) -> Result<Vec<String>, String> {
-        let neutrals = self.sorted_neutral_nodes_locked(data)?;
-        if neutrals.len() < 10 {
-            return Err("Not enough generated nodes yet. Wait for more node batches to complete.".to_string());
-        }
-        let seed = neutrals[(random::<u64>() as usize) % neutrals.len()].clone();
-        let mut scored = neutrals
-            .into_iter()
-            .map(|node| {
-                let score = haversine_km(seed.lat, seed.lon, node.lat, node.lon);
-                (node.id, score)
-            })
-            .collect::<Vec<_>>();
-        scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(scored.into_iter().take(10).map(|item| item.0).collect())
     }
 
     fn choose_start_nodes_around_locked(
@@ -1656,7 +1632,7 @@ impl App {
         let start_nodes = if let Some(node_id) = start_node_id {
             self.choose_start_nodes_around_locked(&mut data, node_id)?
         } else {
-            self.choose_start_nodes_locked(&mut data)?
+            Vec::new()
         };
         for node_id in &start_nodes {
             data.state.nodes.insert(
@@ -1762,7 +1738,7 @@ impl App {
         let start_nodes = if let Some(node_id) = start_node_id.as_deref() {
             self.choose_start_nodes_around_locked(&mut data, node_id)?
         } else {
-            self.choose_start_nodes_locked(&mut data)?
+            Vec::new()
         };
         for node_id in &start_nodes {
             data.state.nodes.insert(
@@ -1807,6 +1783,55 @@ impl App {
         self.purge_expired_sessions_locked(&mut data);
         self.save_state_locked(&mut data.state)?;
         Ok(json!({ "playerId": player_id, "token": session_token }))
+    }
+
+    fn claim_start_node_request(&self, token: &str, node_id: &str) -> Result<Value, String> {
+        let mut data = app_lock(&self.inner);
+        let session = self.require_session_locked(&data, token)?;
+        self.sync_world_nodes_locked(&mut data)?;
+        let start_world = data
+            .state
+            .nodes
+            .get(node_id)
+            .cloned()
+            .ok_or_else(|| "Selected starting node does not exist.".to_string())?;
+        if start_world.owner_id.is_some() {
+            return Err("That node is already owned. Choose a neutral node.".to_string());
+        }
+        let player = data
+            .state
+            .players
+            .get(&session.player_id)
+            .cloned()
+            .ok_or_else(|| "Player not found.".to_string())?;
+        if !player.start_node_ids.is_empty() {
+            return Err("You already have a starting territory.".to_string());
+        }
+        let start_nodes = self.choose_start_nodes_around_locked(&mut data, node_id)?;
+        if start_nodes.is_empty() {
+            return Err("No neutral nodes nearby to form a starting territory.".to_string());
+        }
+        for id in &start_nodes {
+            data.state.nodes.insert(
+                id.clone(),
+                WorldNode {
+                    owner_id: Some(session.player_id.clone()),
+                    army: 10,
+                    building: None,
+                },
+            );
+        }
+        data.player_nodes_dirty = true;
+        if let Some(player) = data.state.players.get_mut(&session.player_id) {
+            player.start_node_ids = start_nodes.clone();
+        }
+        self.recompute_player_economy_locked(&mut data, &session.player_id);
+        self.save_state_locked(&mut data.state)?;
+        Ok(json!({
+            "ok": true,
+            "claimedNodeIds": start_nodes,
+            "count": start_nodes.len()
+        }))
     }
 
     fn logout_player(&self, token: &str) -> Result<Value, String> {
@@ -1895,7 +1920,13 @@ impl App {
                 continue;
             }
 
-            let flow = clamp_i64(attack.send_per_tick.max(1), 1, source_snapshot.army.max(1));
+            let flow = if attack.send_mode == "relative" {
+                let percent = sanitize_send_percent(attack.send_percent);
+                let amount = (source_snapshot.army * percent) / 100;
+                clamp_i64(amount.max(1), 1, source_snapshot.army.max(1))
+            } else {
+                clamp_i64(attack.send_per_tick.max(1), 1, source_snapshot.army.max(1))
+            };
 
             if let Some(source_node) = data.state.nodes.get_mut(&attack.from_node_id) {
                 source_node.army = (source_node.army - flow).max(0);
@@ -1961,7 +1992,7 @@ impl App {
         let last = if data.state.last_tick_at > 0 {
             data.state.last_tick_at
         } else {
-            current
+            current - WORLD_TICK_MS as i64
         };
         let elapsed_ticks = ((current - last).max(0) / WORLD_TICK_MS as i64) as usize;
         let elapsed_ticks = elapsed_ticks.min(MAX_CATCH_UP_TICKS);
@@ -2203,8 +2234,8 @@ impl App {
             .node_repo
             .display_names
             .get(node_id)
-            .cloned()
-            .unwrap_or_else(|| format!("Node {}", node_id));
+            .map(|name| clean_node_display_name(name))
+            .unwrap_or_else(|| "Intersection".to_string());
         Some(json!({
             "type": "Feature",
             "properties": {
@@ -2252,6 +2283,8 @@ impl App {
                 "mode": attack.mode,
                 "createdAt": attack.created_at,
                 "sendPerTick": attack.send_per_tick,
+                "sendMode": attack.send_mode,
+                "sendPercent": attack.send_percent,
                 "fromNodeId": attack.from_node_id,
                 "toNodeId": attack.to_node_id
             },
@@ -2503,6 +2536,26 @@ impl App {
         }))
     }
 
+    fn node_neighbors_response(&self, token: Option<&str>, node_id: &str) -> Result<Value, String> {
+        let mut data = app_lock(&self.inner);
+        let session = token.map(|t| self.require_session_locked(&data, t)).transpose()?;
+        let player_id = session.as_ref().map(|s| s.player_id.as_str());
+        self.sync_world_nodes_locked(&mut data)?;
+        self.ensure_city_membership_locked(&mut data);
+        let neighbor_ids = self.immediate_neighbor_targets_locked(&mut data, node_id)?;
+        let features = neighbor_ids
+            .iter()
+            .filter_map(|id| self.world_feature_locked(&data, id, player_id))
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "nodeId": node_id,
+            "neighbors": {
+                "type": "FeatureCollection",
+                "features": features
+            }
+        }))
+    }
+
     fn connectable_nodes_request(
         &self,
         token: &str,
@@ -2619,6 +2672,8 @@ impl App {
         from_node_id: &str,
         to_node_id: &str,
         send_per_tick: i64,
+        send_mode: Option<&str>,
+        send_percent: Option<i64>,
     ) -> Result<Value, String> {
         let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
@@ -2639,6 +2694,8 @@ impl App {
         }
         let (mode, path, _) =
             self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
+        let send_mode = sanitize_send_mode(send_mode);
+        let send_percent = sanitize_send_percent(send_percent.unwrap_or(10));
         let attack_id = random_id("attack");
         data.state.attacks.insert(
             attack_id.clone(),
@@ -2650,6 +2707,8 @@ impl App {
                 to_node_id: to_node_id.to_string(),
                 path,
                 send_per_tick: sanitize_send_per_tick(send_per_tick),
+                send_mode: send_mode.clone(),
+                send_percent,
                 created_at: now_ms(),
             },
         );
@@ -2663,6 +2722,8 @@ impl App {
             "ok": true,
             "attackId": attack_id,
             "sendPerTick": sanitize_send_per_tick(send_per_tick),
+            "sendMode": send_mode,
+            "sendPercent": send_percent,
             "attack": attack_feature
         }))
     }
@@ -2673,6 +2734,8 @@ impl App {
         from_node_id: &str,
         to_node_id: &str,
         send_per_tick: i64,
+        send_mode: Option<&str>,
+        send_percent: Option<i64>,
     ) -> Result<Value, String> {
         let mut data = app_lock(&self.inner);
         let session = self.require_session_locked(&data, token)?;
@@ -2688,8 +2751,21 @@ impl App {
             })
             .ok_or_else(|| "Connection not found.".to_string())?;
         attack.send_per_tick = next_rate;
+        if let Some(mode) = send_mode {
+            attack.send_mode = sanitize_send_mode(Some(mode));
+        }
+        if let Some(percent) = send_percent {
+            attack.send_percent = sanitize_send_percent(percent);
+        }
+        let send_mode = attack.send_mode.clone();
+        let send_percent = attack.send_percent;
         self.save_state_locked(&mut data.state)?;
-        Ok(json!({ "ok": true, "sendPerTick": next_rate }))
+        Ok(json!({
+            "ok": true,
+            "sendPerTick": next_rate,
+            "sendMode": send_mode,
+            "sendPercent": send_percent
+        }))
     }
 
     fn background_tick(&self) -> Result<(), String> {
@@ -2879,6 +2955,22 @@ fn circle_polygon(center_lat: f64, center_lon: f64, radius_km: f64) -> Value {
     })
 }
 
+fn clean_node_display_name(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    if let Some(pos) = s.rfind("(intersection)") {
+        s.truncate(pos);
+        s = s.trim().to_string();
+    }
+    if s.len() > 1 && s.starts_with('(') && s.ends_with(')') {
+        s = s[1..s.len() - 1].trim().to_string();
+    }
+    if s.starts_with("Node ") || s.is_empty() {
+        "Intersection".to_string()
+    } else {
+        s
+    }
+}
+
 fn format_army_label(value: i64) -> String {
     let army = value.max(0) as f64;
     if army >= ARMY_CAP as f64 {
@@ -3059,8 +3151,27 @@ fn default_send_per_tick() -> i64 {
     1
 }
 
+fn default_send_mode() -> String {
+    "fixed".to_string()
+}
+
+fn default_send_percent() -> i64 {
+    10
+}
+
 fn sanitize_send_per_tick(value: i64) -> i64 {
     clamp_i64(value, 1, 250)
+}
+
+fn sanitize_send_mode(value: Option<&str>) -> String {
+    match value.map(|s| s.trim().to_lowercase()).as_deref() {
+        Some("relative") => "relative".to_string(),
+        _ => "fixed".to_string(),
+    }
+}
+
+fn sanitize_send_percent(value: i64) -> i64 {
+    clamp_i64(value, 1, 100)
 }
 
 fn tile_x_to_lon(x: i64, zoom: i64) -> f64 {
@@ -3356,6 +3467,18 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 let start_node_id = body.get("startNodeId").and_then(Value::as_str);
                 Ok(json_response(200, &app.create_guest_player(start_node_id)?))
             }
+            (&Method::Post, "/api/claim-start-node") => {
+                let body = parse_body_json(&mut request)?;
+                let token = body
+                    .get("token")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Invalid session.".to_string())?;
+                let node_id = body
+                    .get("nodeId")
+                    .and_then(value_to_string)
+                    .ok_or_else(|| "Invalid node.".to_string())?;
+                Ok(json_response(200, &app.claim_start_node_request(token, &node_id)?))
+            }
             (&Method::Get, "/api/game-state") => {
                 let token = extract_bearer_token(&request);
                 let include_nodes = query.get("view").map(String::as_str) != Some("summary");
@@ -3380,6 +3503,14 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     .and_then(|value| value.parse::<i64>().ok())
                     .ok_or_else(|| "z, x, and y are required.".to_string())?;
                 Ok(json_response(200, &app.node_tile_response(token.as_deref(), z, x, y)?))
+            }
+            (&Method::Get, "/api/node-neighbors") => {
+                let token = extract_bearer_token(&request);
+                let node_id = query
+                    .get("nodeId")
+                    .cloned()
+                    .ok_or_else(|| "nodeId is required.".to_string())?;
+                Ok(json_response(200, &app.node_neighbors_response(token.as_deref(), &node_id)?))
             }
             (&Method::Post, "/api/logout") => {
                 let token = extract_bearer_token(&request).or_else(|| {
@@ -3406,9 +3537,11 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     .get("sendPerTick")
                     .and_then(Value::as_i64)
                     .unwrap_or_else(default_send_per_tick);
+                let send_mode = body.get("sendMode").and_then(Value::as_str);
+                let send_percent = body.get("sendPercent").and_then(Value::as_i64);
                 Ok(json_response(
                     200,
-                    &app.attack_node_request(token, &from_node_id, &to_node_id, send_per_tick)?,
+                    &app.attack_node_request(token, &from_node_id, &to_node_id, send_per_tick, send_mode, send_percent)?,
                 ))
             }
             (&Method::Post, "/api/build") => {
@@ -3475,9 +3608,11 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     .get("sendPerTick")
                     .and_then(Value::as_i64)
                     .unwrap_or_else(default_send_per_tick);
+                let send_mode = body.get("sendMode").and_then(Value::as_str);
+                let send_percent = body.get("sendPercent").and_then(Value::as_i64);
                 Ok(json_response(
                     200,
-                    &app.connection_rate_request(token, &from_node_id, &to_node_id, send_per_tick)?,
+                    &app.connection_rate_request(token, &from_node_id, &to_node_id, send_per_tick, send_mode, send_percent)?,
                 ))
             }
             (&Method::Post, "/api/connection-remove") => {

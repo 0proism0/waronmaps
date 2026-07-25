@@ -17,15 +17,18 @@
     .panel-header h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; background: linear-gradient(90deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .panel-body { padding: 18px 20px 22px; }
     .panel-subtitle { color: #94a3b8; font-size: 13px; margin-bottom: 14px; line-height: 1.5; }
-    .show-panel-button { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; display: none; align-items: center; gap: 8px; border: 0; border-radius: 999px; padding: 10px 16px; font-size: 14px; font-weight: 700; color: #fff; background: linear-gradient(90deg, #2563eb, #7c3aed); cursor: pointer; box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35); }
+    .show-panel-button { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 250; display: none; align-items: center; gap: 8px; border: 0; border-radius: 999px; padding: 10px 16px; font-size: 14px; font-weight: 700; color: #fff; background: linear-gradient(90deg, #2563eb, #7c3aed); cursor: pointer; box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35); }
     .show-panel-button.visible { display: inline-flex; }
-    .node-info { left: 16px; bottom: 16px; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 120px); overflow-y: auto; padding: 0; font-size: 13px; }
+    .node-info { right: 16px; bottom: 16px; left: auto; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 120px); overflow-y: auto; padding: 0; font-size: 13px; }
     .node-info.hidden { display: none; }
     .node-info-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
     .node-info-header strong { display: block; font-size: 15px; color: #e2e8f0; }
     .node-info-body { padding: 12px 16px 16px; }
     .node-info .status { margin-top: 8px; }
     .route-controls { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(148, 163, 184, 0.14); }
+    .mode-toggle { display: flex; gap: 8px; margin-bottom: 8px; }
+    .mode-toggle button { flex: 1; }
+    .mode-toggle button.active { background: linear-gradient(90deg, #2563eb, #4f46e5); box-shadow: 0 8px 18px rgba(37, 99, 235, 0.28); }
     .connect-mode-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
     .connect-mode-actions.hidden { display: none; }
     .icon-button { width: 38px; height: 38px; padding: 0; border-radius: 999px; font-size: 24px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
@@ -120,6 +123,8 @@
       .toast-container { top: 12px; right: 12px; left: 12px; max-width: none; }
       .leaderboard-panel { top: 70px; left: 12px; right: 12px; width: auto; max-height: 35vh; }
     }
+    #startLocationOverlay { pointer-events: none; }
+    #startLocationOverlay .tutorial-card { pointer-events: auto; }
   </style>
 </head>
 <body>
@@ -138,7 +143,7 @@
     <div class="panel-body">
       <p class="panel-subtitle">White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.</p>
       <div class="section">
-        <div id="authSummary" class="status">Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.</div>
+        <div id="authSummary" class="status">Register or log in first. Then click a neutral node on the map to claim your starting territory.</div>
         <input id="usernameInput" placeholder="username" autocomplete="username">
         <input id="passwordInput" type="password" placeholder="password" autocomplete="current-password">
         <div class="actions">
@@ -183,7 +188,11 @@
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
     <div class="route-controls">
-      <label for="sendPerTickInput">New connection army per 1s tick</label>
+      <label for="sendPerTickInput" id="sendAmountLabel">New connection army per 1s tick</label>
+      <div class="mode-toggle">
+        <button id="sendModeFixedButton" type="button" class="secondary active">Fixed</button>
+        <button id="sendModeRelativeButton" type="button" class="secondary">Relative</button>
+      </div>
       <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
       <div id="routeInfoHint" class="hint">Hold Space and drag from one of your nodes to an adjacent node to link.</div>
       <div class="actions">
@@ -193,6 +202,7 @@
     <div id="startNodeAction" class="route-controls hidden">
       <div id="startNodeHint" class="hint">Choose this node as the center of your starting territory.</div>
       <div class="actions">
+        <button id="claimStartNodeButton" type="button" class="primary">Claim this node</button>
         <button id="clearStartNodeButton" type="button" class="secondary">Clear</button>
       </div>
     </div>
@@ -222,11 +232,11 @@
     <div class="tutorial-card">
       <div class="tutorial-step active" data-step="0">
         <div class="tutorial-title">Welcome to War on Map</div>
-        <div class="tutorial-text">This is a persistent multiplayer strategy game played on real road intersections. Register, log in, or Play as Guest to claim your starting territory.</div>
+        <div class="tutorial-text">This is a persistent multiplayer strategy game played on real road intersections. Register, log in, or Play as Guest first, then click a neutral node on the map to claim your starting territory.</div>
       </div>
       <div class="tutorial-step" data-step="1">
         <div class="tutorial-title">Find your nodes</div>
-        <div class="tutorial-text">After logging in, the map will center on your green nodes. Each node generates +1 army every few seconds, up to a cap of 1 million.</div>
+        <div class="tutorial-text">After you claim a neutral node, the map will center on your green nodes. Each node generates +1 army every few seconds, up to a cap of 1 million.</div>
       </div>
       <div class="tutorial-step" data-step="2">
         <div class="tutorial-title">Make a connection</div>
@@ -248,6 +258,12 @@
       </div>
     </div>
   </div>
+  <div id="startLocationOverlay" class="tutorial-overlay">
+    <div class="tutorial-card">
+      <div class="tutorial-title">Choose your starting location</div>
+      <div class="tutorial-text">Please choose your starting location. Click any neutral (white/gray) node on the map, then press Claim to begin.</div>
+    </div>
+  </div>
   <script src="/vendor/maplibre-gl.js"></script>
   <script>
     const REGION_MANIFEST_URL = "/local_node_store/region_manifest.json";
@@ -256,12 +272,14 @@
     const GAME_STATE_URL = "/api/game-state";
     const NODE_TILE_URL = "/api/node-tile";
     const CONNECTABLE_NODES_URL = "/api/connectable-nodes";
+    const NODE_NEIGHBORS_URL = "/api/node-neighbors";
     const CONNECTION_RATE_URL = "/api/connection-rate";
     const CONNECTION_REMOVE_URL = "/api/connection-remove";
     const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8003/ws`;
     const REGISTER_URL = "/api/register";
     const LOGIN_URL = "/api/login";
     const GUEST_URL = "/api/guest";
+    const CLAIM_START_NODE_URL = "/api/claim-start-node";
     const ATTACK_URL = "/api/attack";
     const BUILD_URL = "/api/build";
     const LAUNCH_MISSILE_URL = "/api/launch-missile";
@@ -288,6 +306,7 @@
     const NODE_TILE_CACHE_TTL_MS = 5 * 60 * 1000;
     const ZOOM_IN_MESSAGE = "Please zoom in to see nodes.";
     const DEFAULT_SEND_PER_TICK = 1;
+    const DEFAULT_SEND_PERCENT = 10;
     const HIDE_NODE_INFORMATION_TEST = false;
     // Master switch for the buildings/gold/missiles feature. Disabled product-wide:
     // the server also gates /api/build and /api/launch-missile behind BUILDINGS_ENABLED = false.
@@ -303,6 +322,7 @@
     const leaderboardListEl = document.getElementById("leaderboardList");
     const toastContainer = document.getElementById("toastContainer");
     const tutorialOverlay = document.getElementById("tutorialOverlay");
+    const startLocationOverlay = document.getElementById("startLocationOverlay");
     const tutorialNextButton = document.getElementById("tutorialNextButton");
     const tutorialSkipButton = document.getElementById("tutorialSkipButton");
     const tutorialSteps = Array.from(tutorialOverlay.querySelectorAll(".tutorial-step"));
@@ -327,6 +347,9 @@
     const nodeInfoDeltaEl = document.getElementById("nodeInfoDelta");
     const nodeInfoPositionEl = document.getElementById("nodeInfoPosition");
     const sendPerTickInput = document.getElementById("sendPerTickInput");
+    const sendAmountLabel = document.getElementById("sendAmountLabel");
+    const sendModeFixedButton = document.getElementById("sendModeFixedButton");
+    const sendModeRelativeButton = document.getElementById("sendModeRelativeButton");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
     const connectionCanvasEl = document.getElementById("connectionCanvas");
@@ -340,6 +363,7 @@
     const startNodeActionEl = document.getElementById("startNodeAction");
     const startNodeHintEl = document.getElementById("startNodeHint");
     const clearStartNodeButton = document.getElementById("clearStartNodeButton");
+    const claimStartNodeButton = document.getElementById("claimStartNodeButton");
 
     let activeRegion = null;
     let buildPollTimer = null;
@@ -362,6 +386,8 @@
     let renderedNodeFeatureMap = new Map();
     let selectedNodeFeature = null;
     let selectedStartNodeId = null;
+    let sendMode = "fixed";
+    updateAuthButtonsVisibility();
     let spacePressed = false;
     let linkDragState = null;
     let linkDragCursor = { x: 0, y: 0 };
@@ -370,6 +396,7 @@
     let nextBuildPollDelayMs = BUILD_POLL_MS;
     let nextGamePollDelayMs = GAME_POLL_MS;
     let lastWorldUpdateRefreshAt = 0;
+    let lastWorldUpdateVersion = null;
     let missileLaunchMode = null;
     let lastMissileClickAt = 0;
     let overlayVisibility = {
@@ -379,6 +406,7 @@
       missileTarget: true,
     };
     const WORLD_UPDATE_THROTTLE_MS = 2000;
+    const WASD_PAN_PX = 90;
     let visibleTileRefreshTimer = null;
     let activeVisibleTileAbortController = null;
     let lastVisibleTileRefreshStartedAt = 0;
@@ -418,8 +446,42 @@
       }
       return clamp(parsed, 1, 250);
     }
+    function normalizeSendPercent(value) {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed)) {
+        return DEFAULT_SEND_PERCENT;
+      }
+      return clamp(parsed, 1, 100);
+    }
+    function setSendMode(mode) {
+      sendMode = mode === "relative" ? "relative" : "fixed";
+      sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
+      sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
+      sendAmountLabel.textContent = sendMode === "fixed"
+        ? "New connection army per 1s tick"
+        : "New connection percentage of source army (%)";
+      sendPerTickInput.max = sendMode === "fixed" ? "250" : "100";
+      setSendPerTickValue(sendPerTickInput.value);
+    }
     function setSendPerTickValue(value) {
-      sendPerTickInput.value = String(normalizeSendPerTick(value));
+      if (sendMode === "relative") {
+        sendPerTickInput.value = String(normalizeSendPercent(value));
+      } else {
+        sendPerTickInput.value = String(normalizeSendPerTick(value));
+      }
+    }
+    function currentSendAmount() {
+      return sendMode === "relative"
+        ? normalizeSendPercent(sendPerTickInput.value)
+        : normalizeSendPerTick(sendPerTickInput.value);
+    }
+    function configuredSendRateForSource(sourceArmy) {
+      const army = Math.max(0, Math.floor(Number(sourceArmy) || 0));
+      if (sendMode === "relative") {
+        const percent = normalizeSendPercent(sendPerTickInput.value);
+        return Math.max(0, Math.min(Math.floor((army * percent) / 100), army));
+      }
+      return Math.min(normalizeSendPerTick(sendPerTickInput.value), army);
     }
     function formatRatePerSecond(valuePerTick) {
       const perSecond = valuePerTick / WORLD_TICK_SECONDS;
@@ -494,6 +556,8 @@
           mode,
           ownerState: "self",
           sendPerTick,
+          sendMode,
+          sendPercent: normalizeSendPercent(sendPerTickInput.value),
           createdAt: Date.now(),
           local: true,
         },
@@ -533,6 +597,8 @@
           String(props.mode || ""),
           String(props.fromNodeId || ""),
           String(props.toNodeId || ""),
+          String(props.sendMode || "fixed"),
+          String(props.sendPercent || DEFAULT_SEND_PERCENT),
         ].join(":");
         const sendPerTick = normalizeSendPerTick(props.sendPerTick || DEFAULT_SEND_PER_TICK);
         if (!grouped.has(key)) {
@@ -680,12 +746,15 @@
         const fromNodeId = String(attackFeature?.properties?.fromNodeId || "");
         const toNodeId = String(attackFeature?.properties?.toNodeId || "");
         const configuredSendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const configuredSendMode = String(attackFeature?.properties?.sendMode || "fixed");
         const sourceState = nodeState.get(fromNodeId);
         if (!sourceState || sourceState.army <= 0) {
           effectiveFlowByAttackKey.set(key, 0);
           continue;
         }
-        const effectiveSendPerTick = Math.max(0, Math.min(configuredSendPerTick, Math.floor(sourceState.army)));
+        const effectiveSendPerTick = configuredSendMode === "relative"
+          ? Math.max(0, Math.min(Math.floor((sourceState.army * normalizeSendPercent(attackFeature?.properties?.sendPercent || DEFAULT_SEND_PERCENT)) / 100), Math.floor(sourceState.army)))
+          : Math.max(0, Math.min(configuredSendPerTick, Math.floor(sourceState.army)));
         sourceState.army = Math.max(0, sourceState.army - effectiveSendPerTick);
         const targetState = nodeState.get(toNodeId);
         if (targetState) {
@@ -808,6 +877,7 @@
         return;
       }
       try {
+        const sendPercent = normalizeSendPercent(sendPerTick);
         await fetchJson(CONNECTION_RATE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -816,6 +886,8 @@
             fromNodeId,
             toNodeId,
             sendPerTick,
+            sendMode,
+            sendPercent,
           }),
         });
         const nextFeatures = currentAttackFeatures.map((feature) => (
@@ -826,13 +898,16 @@
               properties: {
                 ...feature.properties,
                 sendPerTick: normalizeSendPerTick(sendPerTick),
+                sendMode,
+                sendPercent,
               },
             }
             : feature
         ));
         setAttackFeatures(nextFeatures);
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || null);
-        showToast(`Route ${fromNodeId} -> ${toNodeId} set to ${normalizeSendPerTick(sendPerTick).toLocaleString()}/tick.`, "success");
+        const rateLabel = sendMode === "relative" ? `${sendPercent}%` : `${normalizeSendPerTick(sendPerTick).toLocaleString()}/tick`;
+        showToast(`Route ${fromNodeId} -> ${toNodeId} set to ${rateLabel}.`, "success");
         void refreshGameState();
       } catch (error) {
         showToast(`Route rate update failed: ${error.message}`, "error");
@@ -891,6 +966,7 @@
         }
       }
       const sendPerTick = normalizeSendPerTick(sendPerTickInput.value);
+      const sendPercent = normalizeSendPercent(sendPerTickInput.value);
       const isPersonal = isPersonalMovement(targetFeature);
       let localFeature = null;
       if (!activeRoute && isPersonal) {
@@ -908,6 +984,8 @@
             fromNodeId: selectedNodeId,
             toNodeId: targetNodeId,
             sendPerTick,
+            sendMode,
+            sendPercent,
           }),
         });
         if (response.removed) {
@@ -924,9 +1002,10 @@
           ));
           nextFeatures.push(response.attack);
           setAttackFeatures(nextFeatures);
+          const rateLabel = sendMode === "relative" ? `${sendPercent}%` : formatTickRate(sendPerTick);
           showToast(String(targetFeature?.properties?.ownerState || "") === "self"
-            ? `Transfer started at ${formatTickRate(sendPerTick)}.`
-            : `Attack started at ${formatTickRate(sendPerTick)}.`, "success");
+            ? `Transfer started at ${rateLabel}.`
+            : `Attack started at ${rateLabel}.`, "success");
         }
         updateSelectionStatus();
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
@@ -977,9 +1056,13 @@
         const modeEl = document.createElement("div");
         modeEl.className = "route-row-mode";
         const configuredSendPerTick = normalizeSendPerTick(routeFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const configuredSendPercent = normalizeSendPercent(routeFeature?.properties?.sendPercent || DEFAULT_SEND_PERCENT);
+        const routeSendMode = String(routeFeature?.properties?.sendMode || "fixed");
         const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? configuredSendPerTick;
         const overlapCount = Number(routeFeature?.properties?.overlapCount || 1);
-        modeEl.textContent = `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
+        modeEl.textContent = routeSendMode === "relative"
+          ? `${String(routeFeature?.properties?.mode || "attack")} · relative ${configuredSendPercent}% · ${effectiveSendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`
+          : `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
 
@@ -1074,7 +1157,13 @@
         ? findAttackFeature(selectedNodeId, inspectedId)
         : null;
       if (routeFeature) {
-        setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const routeSendMode = String(routeFeature.properties?.sendMode || "fixed");
+        setSendMode(routeSendMode);
+        if (routeSendMode === "relative") {
+          setSendPerTickValue(routeFeature.properties?.sendPercent || DEFAULT_SEND_PERCENT);
+        } else {
+          setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        }
         updateRouteRateButton.disabled = !sessionToken;
         routeInfoHintEl.textContent = `Route ${selectedNodeId} -> ${inspectedId} is active. Update it here or click again to remove it.`;
         return;
@@ -1730,6 +1819,7 @@
         updateClickedNodeHighlight(null);
         updateHoveredNodeHighlight(null);
         updateStartNodeAction(null);
+        map.getSource("node-neighbors")?.setData(emptyFeatureCollection());
         return;
       }
       nodeInfoEl.classList.remove("hidden");
@@ -1762,10 +1852,15 @@
     function inspectNode(feature) {
       inspectedNodeId = String(feature?.properties?.id || "") || null;
       updateNodeInfo(feature || null);
+      if (inspectedNodeId) {
+        void fetchNodeNeighbors(inspectedNodeId);
+      } else {
+        map.getSource("node-neighbors")?.setData(emptyFeatureCollection());
+      }
     }
 
     function updateStartNodeAction(feature) {
-      if (sessionToken || !feature) {
+      if (!feature || !sessionToken || lastOwnedFeatures.length > 0) {
         startNodeActionEl.classList.add("hidden");
         return;
       }
@@ -1773,11 +1868,16 @@
       const nodeId = String(feature.properties?.id || "");
       if (ownerState !== "neutral") {
         startNodeHintEl.textContent = "This node is already owned. Choose a neutral (white/gray) node to start.";
-      } else {
-        startNodeHintEl.textContent = selectedStartNodeId === nodeId
-          ? "This node is selected as your starting location."
-          : "Click a neutral node to choose your starting location.";
+        claimStartNodeButton.classList.add("hidden");
+        clearStartNodeButton.classList.toggle("hidden", !selectedStartNodeId);
+        startNodeActionEl.classList.remove("hidden");
+        return;
       }
+      const isSelected = selectedStartNodeId === nodeId;
+      startNodeHintEl.textContent = isSelected
+        ? "Click Claim to make this node the center of your starting territory."
+        : "Choose a neutral node, then click Claim to start there.";
+      claimStartNodeButton.classList.toggle("hidden", !isSelected);
       clearStartNodeButton.classList.toggle("hidden", !selectedStartNodeId);
       startNodeActionEl.classList.remove("hidden");
     }
@@ -1969,17 +2069,6 @@
       }
     }
 
-    function selectStartNode(feature) {
-      if (!feature || feature.properties?.ownerState !== "neutral") {
-        showToast("Choose a neutral node to start.", "error");
-        return;
-      }
-      selectedStartNodeId = String(feature.properties?.id || "");
-      showToast(`Starting territory set to node ${selectedStartNodeId}. Register to claim it.`, "success");
-      updateStartNodeAction(feature);
-      updateAuthSummaryForGuest();
-    }
-
     function clearStartNode() {
       selectedStartNodeId = null;
       updateStartNodeInfo();
@@ -1991,11 +2080,67 @@
       updateStartNodeAction(feature);
     }
 
+    async function fetchNodeNeighbors(nodeId) {
+      if (!nodeId) {
+        return;
+      }
+      try {
+        const headers = {};
+        if (sessionToken) {
+          headers.Authorization = `Bearer ${sessionToken}`;
+        }
+        const payload = await fetchJson(`${NODE_NEIGHBORS_URL}?nodeId=${encodeURIComponent(nodeId)}`, { headers, cache: "no-store" });
+        if (inspectedNodeId !== nodeId) {
+          return;
+        }
+        map.getSource("node-neighbors")?.setData(payload.neighbors || emptyFeatureCollection());
+      } catch (error) {
+        console.warn("Failed to load node neighbors:", error);
+      }
+    }
+
     function updateAuthSummaryForGuest() {
       if (sessionToken) return;
-      authSummaryEl.textContent = selectedStartNodeId
-        ? `Starting node selected: ${selectedStartNodeId}. Register, log in, or click Play as Guest.`
-        : "Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.";
+      authSummaryEl.textContent = "Register or log in first. Then click a neutral node on the map to claim your starting territory.";
+    }
+
+    function updateAuthButtonsVisibility() {
+      const loggedIn = Boolean(sessionToken);
+      registerButton.classList.toggle("hidden", loggedIn);
+      loginButton.classList.toggle("hidden", loggedIn);
+      guestButton.classList.toggle("hidden", loggedIn);
+      logoutButton.classList.toggle("hidden", !loggedIn);
+    }
+
+    function updateStartLocationOverlay() {
+      const needsStart = Boolean(sessionToken && lastOwnedFeatures.length === 0);
+      startLocationOverlay.classList.toggle("show", needsStart);
+    }
+
+    async function claimStartNode(nodeId) {
+      if (!sessionToken || !nodeId) {
+        showToast("Log in first, then select a neutral node to claim.", "error");
+        return;
+      }
+      try {
+        const result = await fetchJson(CLAIM_START_NODE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: sessionToken, nodeId }),
+        });
+        selectedStartNodeId = null;
+        clearNodeTileResponseCache();
+        await refreshGameState();
+        updateStartLocationOverlay();
+        scheduleVisibleTileRefresh(0, true);
+        if (lastOwnedFeatures.length) {
+          focusOwnedNodes(lastOwnedFeatures, true);
+        }
+        showToast(`Starting territory claimed! ${result.count || 0} nodes.`, "success");
+        showTutorial();
+      } catch (error) {
+        showToast(`Claim failed: ${error.message}`, "error");
+      }
     }
 
     async function updateSelectedRouteRate() {
@@ -2048,7 +2193,16 @@
       selectedNodeFeature = feature;
       hoveredAttackKey = null;
       selectedNodeTextEl.textContent = selectedNodeSummary(feature);
-      setSendPerTickValue(findAttackFeature(nodeId, inspectedNodeId)?.properties?.sendPerTick || sendPerTickInput.value);
+      const activeRoute = findAttackFeature(nodeId, inspectedNodeId);
+      if (activeRoute) {
+        const routeSendMode = String(activeRoute.properties?.sendMode || "fixed");
+        setSendMode(routeSendMode);
+        setSendPerTickValue(routeSendMode === "relative"
+          ? activeRoute.properties?.sendPercent || DEFAULT_SEND_PERCENT
+          : activeRoute.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+      } else {
+        setSendPerTickValue(sendPerTickInput.value);
+      }
       clearConnectableTargets();
       void refreshSelectedNodeTargets();
       setStatus(statusMessage || `Selected node ${nodeId}. Hold Space and drag to an adjacent node to link.`);
@@ -2167,8 +2321,7 @@
         updateHoveredNodeHighlight(targetFeature);
         const sourceArmy = Math.max(0, Number(linkDragState.fromFeature?.properties?.army || 0));
         const targetArmy = Math.max(0, Number(targetFeature.properties?.army || 0));
-        const configuredRate = normalizeSendPerTick(sendPerTickInput.value);
-        const effectiveRate = Math.min(configuredRate, sourceArmy);
+        const effectiveRate = configuredSendRateForSource(sourceArmy);
         const mode = isPersonalMovement(targetFeature) ? "transfer" : "attack";
         let preview = `Release to link ${linkDragState.fromNodeId} -> ${targetId}: ${mode} ${effectiveRate.toLocaleString()}/tick vs ${targetArmy.toLocaleString()} army.`;
         if (mode === "attack" && effectiveRate > 0) {
@@ -2534,8 +2687,7 @@
             if (targetFeature && linkDragSnapTarget) {
               const sourceArmy = Math.max(0, Number(linkDragState.fromFeature?.properties?.army || 0));
               const targetArmy = Math.max(0, Number(targetFeature.properties?.army || 0));
-              const configuredRate = normalizeSendPerTick(sendPerTickInput.value);
-              const effectiveRate = Math.min(configuredRate, sourceArmy);
+              const effectiveRate = configuredSendRateForSource(sourceArmy);
               const labelLines = [`${effectiveRate.toLocaleString()}/tick vs ${targetArmy.toLocaleString()}`];
               if (previewMode === "attack" && effectiveRate > 0) {
                 const ticks = Math.floor(targetArmy / effectiveRate) + 1;
@@ -2714,11 +2866,17 @@
       const nodeId = String(props.id);
       if (!sessionToken) {
         inspectNode(feature);
+        return;
+      }
+      if (lastOwnedFeatures.length === 0) {
+        inspectNode(feature);
         if (props.ownerState === "neutral") {
-          selectStartNode(feature);
+          selectedStartNodeId = nodeId;
+          showToast(`Node ${nodeId} selected. Click Claim to start your territory.`, "info");
         } else {
-          updateStartNodeAction(feature);
+          selectedStartNodeId = null;
         }
+        updateStartNodeAction(feature);
         return;
       }
       if (selectedNodeId === nodeId) {
@@ -2996,8 +3154,9 @@
         wsConnection.addEventListener("open", () => {
           wsReconnectAttempts = 0;
           wsConnection.send(JSON.stringify({ type: "auth", token: sessionToken }));
+          clearNodeTileResponseCache();
           void refreshGameState();
-          scheduleVisibleTileRefresh(100, false);
+          scheduleVisibleTileRefresh(100, true);
         });
         wsConnection.addEventListener("message", (event) => {
           try {
@@ -3061,10 +3220,19 @@
         }
       } else if (message.type === "world-update") {
         const now = Date.now();
-        if (now - lastWorldUpdateRefreshAt >= WORLD_UPDATE_THROTTLE_MS) {
+        const versionChanged = message.version !== undefined
+          ? message.version !== lastWorldUpdateVersion
+          : true;
+        if (message.version !== undefined) {
+          lastWorldUpdateVersion = message.version;
+        }
+        if (versionChanged || now - lastWorldUpdateRefreshAt >= WORLD_UPDATE_THROTTLE_MS) {
           lastWorldUpdateRefreshAt = now;
+          if (versionChanged) {
+            clearNodeTileResponseCache();
+          }
           void refreshGameState();
-          scheduleVisibleTileRefresh(100, false);
+          scheduleVisibleTileRefresh(100, versionChanged);
         }
       }
     }
@@ -3082,6 +3250,8 @@
       clearConnectableTargets();
       localStorage.removeItem(SESSION_KEY);
       authSummaryEl.textContent = message;
+      updateAuthButtonsVisibility();
+      updateStartLocationOverlay();
       showMainPanel(true);
       showToast(`Session cleared: ${message}`, "error");
     }
@@ -3093,11 +3263,16 @@
         const ownedFeatures = state.ownedNodes?.features || [];
         lastOwnedFeatures = ownedFeatures;
         setAttackFeatures(state.attacks?.features || []);
-        authSummaryEl.textContent = state.player
-          ? `Logged in as ${state.player.username}. You own ${ownedFeatures.length} green nodes.`
-          : (selectedStartNodeId
-            ? `Starting node selected: ${selectedStartNodeId}. Register, log in, or click Play as Guest.`
-            : "Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.");
+        if (state.player) {
+          if (ownedFeatures.length) {
+            authSummaryEl.textContent = `Logged in as ${state.player.username}. You own ${ownedFeatures.length} green nodes.`;
+          } else {
+            authSummaryEl.textContent = `Logged in as ${state.player.username}. Click a neutral node to claim your starting territory.`;
+          }
+        } else {
+          authSummaryEl.textContent = "Register or log in first. Then click a neutral node on the map to claim your starting territory.";
+        }
+        updateAuthButtonsVisibility();
         if (FEATURE_BUILDINGS) {
           goldTextEl.textContent = (state.player?.gold || 0).toLocaleString();
           incomeTextEl.textContent = (state.player?.goldIncomePerSec || 0).toLocaleString();
@@ -3127,6 +3302,7 @@
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         renderSelectedNodeTargets();
         updateSelectionStatus();
+        updateStartLocationOverlay();
       } catch (error) {
         if (error.retryable) {
           throw error;
@@ -3168,8 +3344,9 @@
 
     async function gamePollLoop() {
       try {
+        clearNodeTileResponseCache();
         await refreshGameState();
-        scheduleVisibleTileRefresh(100, false);
+        scheduleVisibleTileRefresh(100, true);
         nextGamePollDelayMs = GAME_POLL_MS;
       } catch (error) {
         nextGamePollDelayMs = error.retryable ? (error.retryAfterMs || NETWORK_RETRY_MS) : GAME_POLL_MS;
@@ -3189,14 +3366,8 @@
       try {
         setAuthPending(true, actionLabel);
         saveLoginFormState();
-        if (endpoint === REGISTER_URL && !selectedStartNodeId) {
-          throw new Error("Click a neutral node on the map to choose your starting location.");
-        }
         authSummaryEl.textContent = `${actionLabel} in progress...`;
         const payload = { username: usernameInput.value.trim(), password: passwordInput.value };
-        if (endpoint === REGISTER_URL) {
-          payload.startNodeId = selectedStartNodeId;
-        }
         const body = JSON.stringify(payload);
         const result = await fetchJson(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body });
         sessionToken = result.token;
@@ -3205,15 +3376,17 @@
         panelAutoHiddenForSession = false;
         localStorage.setItem(SESSION_KEY, sessionToken);
         saveLoginFormState();
+        updateAuthButtonsVisibility();
         authSummaryEl.textContent = `${actionLabel} successful. Loading your nodes...`;
         hideMainPanel(true);
         panelAutoHiddenForSession = true;
         showToast(`${actionLabel} successful. Loading your nodes...`, "success");
-        if (endpoint === REGISTER_URL) {
-          showTutorial();
-        }
         connectWebSocket();
         await refreshGameState();
+        updateStartLocationOverlay();
+        if (lastOwnedFeatures.length === 0) {
+          showToast("Click a neutral node, then Claim to start your territory.", "info");
+        }
         selectedStartNodeId = null;
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         scheduleVisibleTileRefresh(0, true);
@@ -3232,31 +3405,38 @@
     loginButton.addEventListener("click", () => submitAuth(LOGIN_URL));
     guestButton.addEventListener("click", () => submitGuest());
     clearStartNodeButton.addEventListener("click", clearStartNode);
+    claimStartNodeButton.addEventListener("click", () => {
+      if (selectedStartNodeId) {
+        void claimStartNode(selectedStartNodeId);
+      }
+    });
 
     async function submitGuest() {
       if (authRequestInFlight) return;
       try {
         setAuthPending(true, "Guest");
-        if (!selectedStartNodeId) {
-          throw new Error("Click a neutral node on the map to choose your starting location.");
-        }
         authSummaryEl.textContent = "Joining as guest...";
         const result = await fetchJson(GUEST_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ startNodeId: selectedStartNodeId }),
+          body: JSON.stringify({}),
         });
         sessionToken = result.token;
         clearNodeTileResponseCache();
         autoFocusedPlayerId = null;
         panelAutoHiddenForSession = false;
         localStorage.setItem(SESSION_KEY, sessionToken);
+        updateAuthButtonsVisibility();
         authSummaryEl.textContent = "Guest login successful. Loading your nodes...";
         hideMainPanel(true);
         panelAutoHiddenForSession = true;
         showToast("Guest login successful. Loading your nodes...", "success");
         connectWebSocket();
         await refreshGameState();
+        updateStartLocationOverlay();
+        if (lastOwnedFeatures.length === 0) {
+          showToast("Click a neutral node, then Claim to start your territory.", "info");
+        }
         selectedStartNodeId = null;
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         scheduleVisibleTileRefresh(0, true);
@@ -3270,6 +3450,8 @@
       }
     }
     usernameInput.addEventListener("input", saveLoginFormState);
+    sendModeFixedButton.addEventListener("click", () => setSendMode("fixed"));
+    sendModeRelativeButton.addEventListener("click", () => setSendMode("relative"));
     sendPerTickInput.addEventListener("change", () => {
       setSendPerTickValue(sendPerTickInput.value);
       updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
@@ -3318,7 +3500,7 @@
       lastOwnedFeatures = [];
       localStorage.removeItem(SESSION_KEY);
       clearNodeTileResponseCache();
-      authSummaryEl.textContent = "Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.";
+      authSummaryEl.textContent = "Register or log in first. Then click a neutral node on the map to claim your starting territory.";
       selectedNodeId = null;
       selectedNodeFeature = null;
       selectedStartNodeId = null;
@@ -3328,6 +3510,8 @@
       clearSelectedNodeTargets();
       updateNodeInfo(null);
       clearConnectableTargets();
+      updateStartLocationOverlay();
+      map.getSource("node-neighbors")?.setData(emptyFeatureCollection());
       map.getSource("game-nodes")?.setData(emptyFeatureCollection());
       setAttackFeatures([]);
       setStatus(defaultStatusMessage());
@@ -3340,6 +3524,7 @@
         }
       }
       sessionToken = "";
+      updateAuthButtonsVisibility();
       fetchLeaderboard();
       showMainPanel(true);
       if (activeRegion?.active_region) {
@@ -3362,6 +3547,18 @@
         } else {
           clearSelection(defaultStatusMessage());
         }
+      } else if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) {
+        if (!map) {
+          return;
+        }
+        event.preventDefault();
+        const panBy = {
+          KeyW: [0, -WASD_PAN_PX],
+          KeyS: [0, WASD_PAN_PX],
+          KeyA: [-WASD_PAN_PX, 0],
+          KeyD: [WASD_PAN_PX, 0],
+        }[event.code];
+        map.panBy(panBy, { animate: true });
       }
     });
     window.addEventListener("keyup", (event) => {
@@ -3412,6 +3609,7 @@
       map.addSource("query-blocks", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("game-nodes", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("connectable-nodes", { type: "geojson", data: emptyFeatureCollection() });
+      map.addSource("node-neighbors", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("selected-node", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("hover-node", { type: "geojson", data: emptyFeatureCollection() });
       map.addSource("city-borders", { type: "geojson", data: emptyFeatureCollection() });
@@ -3424,6 +3622,7 @@
       map.addLayer({ id: "city-borders-line", type: "line", source: "city-borders", minzoom: NODE_MIN_ZOOM - 2, paint: { "line-color": ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"], "line-width": 2, "line-dasharray": [4, 3] } });
       map.addLayer({ id: "playable-boundary", type: "line", source: "generation-target", paint: { "line-color": "#ef4444", "line-width": 4, "line-opacity": 1 } });
       map.addLayer({ id: "connectable-node-rings", type: "circle", source: "connectable-nodes", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 12, 13, 15, 16, 18], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "rgba(0,0,0,0)", "circle-stroke-width": 0, "circle-opacity": 0 } });
+      map.addLayer({ id: "node-neighbor-rings", type: "circle", source: "node-neighbors", minzoom: NODE_MIN_ZOOM, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 8, 11.5, 12, 13, 16, 16, 20], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#22d3ee", "circle-stroke-width": 2, "circle-opacity": 0.85 } });
       map.addLayer({ id: "game-node-dots", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, maxzoom: 11.5, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 2, 11.5, 5], "circle-stroke-color": "#000000", "circle-stroke-width": 1, "circle-opacity": 0.95 } });
       map.addLayer({ id: "game-node-circles", type: "circle", source: "game-nodes", minzoom: 11.5, layout: { "circle-sort-key": ["get", "army"] }, paint: { "circle-color": ["case", ["==", ["get", "ownerState"], "neutral"], "#e2e8f0", ["case", ["!=", ["typeof", ["get", "ownerColor"]], "null"], ["get", "ownerColor"], "#94a3b8"]], "circle-radius": ["interpolate", ["linear"], ["zoom"], 11.5, 10.5, 13, 13.5, 16, 17.5], "circle-stroke-color": "#000000", "circle-stroke-width": 1.5, "circle-opacity": 0.96 } });
       map.addLayer({ id: "self-node-ring", type: "circle", source: "game-nodes", minzoom: NODE_MIN_ZOOM, filter: ["==", ["get", "ownerState"], "self"], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], NODE_MIN_ZOOM, 13, 13, 17, 16, 21], "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#22c55e", "circle-stroke-width": 2.2, "circle-opacity": 0.85 } });
@@ -3479,6 +3678,7 @@
       if (HIDE_NODE_INFORMATION_TEST) {
         nodeInfoEl.classList.add("hidden");
       }
+      setSendMode("fixed");
       setSendPerTickValue(DEFAULT_SEND_PER_TICK);
       loadPanelState();
       fetchLeaderboard();
