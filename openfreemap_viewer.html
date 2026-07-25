@@ -137,12 +137,13 @@
     <div class="panel-body">
       <p class="panel-subtitle">White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.</p>
       <div class="section">
-        <div id="authSummary" class="status">Register or log in. Click a neutral node on the map to choose where to start.</div>
+        <div id="authSummary" class="status">Register, log in, or Play as Guest. Click a neutral node on the map to choose where to start.</div>
         <input id="usernameInput" placeholder="username" autocomplete="username">
         <input id="passwordInput" type="password" placeholder="password" autocomplete="current-password">
         <div class="actions">
           <button id="registerButton" type="button">Register</button>
           <button id="loginButton" type="button" class="secondary">Login</button>
+          <button id="guestButton" type="button" class="secondary">Play as Guest</button>
           <button id="logoutButton" type="button" class="secondary">Logout</button>
         </div>
       </div>
@@ -220,7 +221,7 @@
     <div class="tutorial-card">
       <div class="tutorial-step active" data-step="0">
         <div class="tutorial-title">Welcome to War on Map</div>
-        <div class="tutorial-text">This is a persistent multiplayer strategy game played on real road intersections. Register or log in to claim your starting territory.</div>
+        <div class="tutorial-text">This is a persistent multiplayer strategy game played on real road intersections. Register, log in, or Play as Guest to claim your starting territory.</div>
       </div>
       <div class="tutorial-step" data-step="1">
         <div class="tutorial-title">Find your nodes</div>
@@ -259,6 +260,7 @@
     const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8003/ws`;
     const REGISTER_URL = "/api/register";
     const LOGIN_URL = "/api/login";
+    const GUEST_URL = "/api/guest";
     const ATTACK_URL = "/api/attack";
     const BUILD_URL = "/api/build";
     const LAUNCH_MISSILE_URL = "/api/launch-missile";
@@ -308,6 +310,7 @@
     const passwordInput = document.getElementById("passwordInput");
     const registerButton = document.getElementById("registerButton");
     const loginButton = document.getElementById("loginButton");
+    const guestButton = document.getElementById("guestButton");
     const logoutButton = document.getElementById("logoutButton");
     const authSummaryEl = document.getElementById("authSummary");
     const regionTextEl = document.getElementById("regionText");
@@ -1255,11 +1258,13 @@
       authRequestInFlight = pending;
       registerButton.disabled = pending;
       loginButton.disabled = pending;
+      guestButton.disabled = pending;
       logoutButton.disabled = pending;
       usernameInput.disabled = pending;
       passwordInput.disabled = pending;
       registerButton.textContent = pending && actionLabel === "Register" ? "Registering..." : "Register";
       loginButton.textContent = pending && actionLabel === "Login" ? "Logging in..." : "Login";
+      guestButton.textContent = pending && actionLabel === "Guest" ? "Joining..." : "Play as Guest";
       logoutButton.textContent = pending ? "Please wait..." : "Logout";
     }
     function loadPanelState() {
@@ -3208,6 +3213,9 @@
         hideMainPanel(true);
         panelAutoHiddenForSession = true;
         showToast(`${actionLabel} successful. Loading your nodes...`, "success");
+        if (endpoint === REGISTER_URL) {
+          showTutorial();
+        }
         connectWebSocket();
         await refreshGameState();
         selectedStartNodeId = null;
@@ -3226,7 +3234,45 @@
 
     registerButton.addEventListener("click", () => submitAuth(REGISTER_URL));
     loginButton.addEventListener("click", () => submitAuth(LOGIN_URL));
+    guestButton.addEventListener("click", () => submitGuest());
     clearStartNodeButton.addEventListener("click", clearStartNode);
+
+    async function submitGuest() {
+      if (authRequestInFlight) return;
+      try {
+        setAuthPending(true, "Guest");
+        if (!selectedStartNodeId) {
+          throw new Error("Click a neutral node on the map to choose your starting location.");
+        }
+        authSummaryEl.textContent = "Joining as guest...";
+        const result = await fetchJson(GUEST_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ startNodeId: selectedStartNodeId }),
+        });
+        sessionToken = result.token;
+        clearNodeTileResponseCache();
+        autoFocusedPlayerId = null;
+        panelAutoHiddenForSession = false;
+        localStorage.setItem(SESSION_KEY, sessionToken);
+        authSummaryEl.textContent = "Guest login successful. Loading your nodes...";
+        hideMainPanel(true);
+        panelAutoHiddenForSession = true;
+        showToast("Guest login successful. Loading your nodes...", "success");
+        connectWebSocket();
+        await refreshGameState();
+        selectedStartNodeId = null;
+        updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
+        scheduleVisibleTileRefresh(0, true);
+        fetchLeaderboard();
+      } catch (error) {
+        authSummaryEl.textContent = error.message;
+        showToast(error.message, "error");
+        showMainPanel(true);
+      } finally {
+        setAuthPending(false);
+      }
+    }
     usernameInput.addEventListener("input", saveLoginFormState);
     sendPerTickInput.addEventListener("change", () => {
       setSendPerTickValue(sendPerTickInput.value);
@@ -3357,7 +3403,7 @@
       map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/liberty", center: [-70.5, 43.8], zoom: 11.8 });
       map.on("move", () => { cameraGeneration += 1; });
       map.addControl(new maplibregl.NavigationControl(), "top-right");
-      map.on("load", async () => {
+      map.on("load", async () => { try {
       const style = map.getStyle();
       for (const layer of style.layers || []) {
         const id = String(layer.id || "").toLowerCase();
@@ -3469,7 +3515,7 @@
         attackArrowAnimationFrame = window.requestAnimationFrame(renderAttackArrows);
       }
       if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-      });
+      } catch (error) { console.error("Map initialization failed:", error); setStatus("Initialization failed: " + error.message); showToast("Initialization failed: " + error.message, "error"); } });
     }
 
     async function waitForServerReady() {

@@ -46,6 +46,7 @@ const SAM_RADIUS_KM: f64 = 5.0;
 // /api/build and /api/launch-missile are gated off; gold still accrues so the
 // feature can be re-enabled without a state migration.
 const BUILDINGS_ENABLED: bool = false;
+const GUEST_USERNAME_PREFIX: &str = "guest_";
 const PLAYER_COLORS: &[&str] = &[
     "#c81c1c", "#c8391c", "#c8561c", "#c8721c", "#c88f1c", "#c8ac1c", "#c8c81c", "#acc81c",
     "#8fc81c", "#72c81c", "#56c81c", "#39c81c", "#1cc81c", "#1cc839", "#1cc856", "#1cc872",
@@ -237,6 +238,8 @@ struct Player {
     damage_reduction_percent: i64,
     #[serde(default)]
     happiness_percent: i64,
+    #[serde(default)]
+    is_guest: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1640,6 +1643,9 @@ impl App {
         if password.len() < 4 {
             return Err("Password must be at least 4 characters.".to_string());
         }
+        if normalized.starts_with(GUEST_USERNAME_PREFIX) {
+            return Err("That username prefix is reserved.".to_string());
+        }
         let start_node_id = start_node_id.map(|s| s.trim()).filter(|s| !s.is_empty());
         let mut data = app_lock(&self.inner);
         if data.state.usernames.contains_key(&normalized) {
@@ -1678,6 +1684,7 @@ impl App {
                 gold_updated_at: now,
                 damage_reduction_percent: 0,
                 happiness_percent: 0,
+                is_guest: false,
             },
         );
         self.recompute_player_economy_locked(&mut data, &player_id);
@@ -1711,6 +1718,9 @@ impl App {
             .get(&player_id)
             .cloned()
             .ok_or_else(|| "Invalid username or password.".to_string())?;
+        if player.is_guest {
+            return Err("Please use Play as Guest or register an account.".to_string());
+        }
         let (verified, is_old_hash) = verify_password(password, &player.password_hash)?;
         if !verified {
             return Err("Invalid username or password.".to_string());
@@ -1731,6 +1741,69 @@ impl App {
                 player_ref.password_hash = hash_password_argon2(password)?;
             }
         }
+        self.purge_expired_sessions_locked(&mut data);
+        self.save_state_locked(&mut data.state)?;
+        Ok(json!({ "playerId": player_id, "token": session_token }))
+    }
+
+    fn create_guest_player(&self, start_node_id: Option<&str>) -> Result<Value, String> {
+        let start_node_id = start_node_id.map(|s| s.trim()).filter(|s| !s.is_empty());
+        let mut data = app_lock(&self.inner);
+
+        let username = loop {
+            let candidate = format!("{}{:016x}", GUEST_USERNAME_PREFIX, random::<u64>());
+            if !data.state.usernames.contains_key(&candidate) {
+                break candidate;
+            }
+        };
+
+        let player_id = random_id("player");
+        let session_token = random_id("session");
+        let start_nodes = if let Some(node_id) = start_node_id.as_deref() {
+            self.choose_start_nodes_around_locked(&mut data, node_id)?
+        } else {
+            self.choose_start_nodes_locked(&mut data)?
+        };
+        for node_id in &start_nodes {
+            data.state.nodes.insert(
+                node_id.clone(),
+                WorldNode {
+                    owner_id: Some(player_id.clone()),
+                    army: 10,
+                    building: None,
+                },
+            );
+        }
+        data.player_nodes_dirty = true;
+        let now = now_ms();
+        data.state.players.insert(
+            player_id.clone(),
+            Player {
+                id: player_id.clone(),
+                username: username.clone(),
+                password_hash: String::new(),
+                created_at: now,
+                start_node_ids: start_nodes.clone(),
+                color: normalize_player_color(None),
+                gold: 0,
+                gold_income_per_sec: 0,
+                gold_updated_at: now,
+                damage_reduction_percent: 0,
+                happiness_percent: 0,
+                is_guest: true,
+            },
+        );
+        self.recompute_player_economy_locked(&mut data, &player_id);
+        data.state.usernames.insert(username, player_id.clone());
+        data.state.sessions.insert(
+            session_token.clone(),
+            Session {
+                token: session_token.clone(),
+                player_id: player_id.clone(),
+                created_at: now,
+                expires_at: now + 7 * 24 * 60 * 60 * 1000,
+            },
+        );
         self.purge_expired_sessions_locked(&mut data);
         self.save_state_locked(&mut data.state)?;
         Ok(json!({ "playerId": player_id, "token": session_token }))
@@ -2292,7 +2365,7 @@ impl App {
         let mut leaderboard = Vec::new();
         for (player_id, (nodes, army)) in scores {
             if let Some(player) = data.state.players.get(&player_id) {
-                if Self::is_test_or_bot_username(&player.username) {
+                if Self::is_test_or_bot_username(&player.username) || player.is_guest {
                     continue;
                 }
                 leaderboard.push(json!({
@@ -2403,14 +2476,14 @@ impl App {
 
     fn node_tile_response(
         &self,
-        token: &str,
+        token: Option<&str>,
         z: i64,
         x: i64,
         y: i64,
     ) -> Result<Value, String> {
         let mut data = app_lock(&self.inner);
-        let session = self.require_session_locked(&data, token)?;
-        let player_id = Some(session.player_id.as_str());
+        let session = token.map(|t| self.require_session_locked(&data, t)).transpose()?;
+        let player_id = session.as_ref().map(|s| s.player_id.as_str());
         let node_ids = self.node_ids_for_tile_locked(&mut data, z, x, y)?;
         // The repo may have been reloaded above; refresh caches before
         // world_feature_locked consults them.
@@ -2649,14 +2722,33 @@ impl App {
             "/sw.js" => PathBuf::from("sw.js"),
             "/vendor/maplibre-gl.js" => PathBuf::from("vendor/maplibre-gl.js"),
             "/vendor/maplibre-gl.css" => PathBuf::from("vendor/maplibre-gl.css"),
-            _ => return error_json_response(404, &json!({ "error": "Not found." })),
+            _ => {
+                if pathname.starts_with("/local_node_store/") {
+                    PathBuf::from(&pathname[1..])
+                } else {
+                    return error_json_response(404, &json!({ "error": "Not found." }));
+                }
+            }
         };
-        let file_path = self.root.join(relative);
-        match fs::read(&file_path) {
+        let file_path = self.root.join(&relative);
+        let canonical_root = match fs::canonicalize(&self.root) {
+            Ok(p) => p,
+            Err(_) => return error_json_response(500, &json!({ "error": "Server misconfiguration." })),
+        };
+        let canonical_file = match fs::canonicalize(&file_path) {
+            Ok(p) => p,
+            Err(_) => return error_json_response(404, &json!({ "error": "Not found." })),
+        };
+        if !canonical_file.starts_with(&canonical_root) {
+            return error_json_response(403, &json!({ "error": "Forbidden." }));
+        }
+        match fs::read(&canonical_file) {
             Ok(data) => {
                 let cache_control = if pathname.contains("build_status")
                     || pathname.contains("preview_intersections")
                     || pathname.contains("query_tiles_status")
+                    || pathname.contains("region_manifest")
+                    || pathname.contains("state_boundaries")
                 {
                     "no-store"
                 } else {
@@ -2664,7 +2756,7 @@ impl App {
                 };
                 Response::from_data(data)
                     .with_status_code(StatusCode(200))
-                    .with_header(header("Content-Type", content_type(&file_path)))
+                    .with_header(header("Content-Type", content_type(&canonical_file)))
                     .with_header(header("Cache-Control", cache_control))
             }
             Err(_) => error_json_response(404, &json!({ "error": "Not found." })),
@@ -3259,6 +3351,11 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 let password = body.get("password").and_then(Value::as_str).unwrap_or_default();
                 Ok(json_response(200, &app.login_player(username, password)?))
             }
+            (&Method::Post, "/api/guest") => {
+                let body = parse_body_json(&mut request)?;
+                let start_node_id = body.get("startNodeId").and_then(Value::as_str);
+                Ok(json_response(200, &app.create_guest_player(start_node_id)?))
+            }
             (&Method::Get, "/api/game-state") => {
                 let token = extract_bearer_token(&request);
                 let include_nodes = query.get("view").map(String::as_str) != Some("summary");
@@ -3269,8 +3366,7 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                 Ok(json_response(200, &app.leaderboard_response(token.as_deref())?))
             }
             (&Method::Get, "/api/node-tile") => {
-                let token = extract_bearer_token(&request)
-                    .ok_or_else(|| "Invalid session.".to_string())?;
+                let token = extract_bearer_token(&request);
                 let z = query
                     .get("z")
                     .and_then(|value| value.parse::<i64>().ok())
@@ -3283,7 +3379,7 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     .get("y")
                     .and_then(|value| value.parse::<i64>().ok())
                     .ok_or_else(|| "z, x, and y are required.".to_string())?;
-                Ok(json_response(200, &app.node_tile_response(&token, z, x, y)?))
+                Ok(json_response(200, &app.node_tile_response(token.as_deref(), z, x, y)?))
             }
             (&Method::Post, "/api/logout") => {
                 let token = extract_bearer_token(&request).or_else(|| {

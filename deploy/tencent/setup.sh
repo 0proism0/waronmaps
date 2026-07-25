@@ -9,6 +9,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 RUN_USER="${SUDO_USER:-ubuntu}"
+CARGO_ENV="/home/$RUN_USER/.cargo/env"
 
 ensure_swap() {
   local total_mem_kb total_mem_gb swap_total_kb swap_gb
@@ -69,7 +70,7 @@ fi
 export PATH="/home/$RUN_USER/.cargo/bin:$PATH"
 
 echo "==> Building Rust server..."
-sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && cargo build --release --manifest-path rust_server/Cargo.toml"
+sudo -u "$RUN_USER" bash -lc "source '$CARGO_ENV' && cd '$ROOT_DIR' && cargo build --release --manifest-path rust_server/Cargo.toml"
 
 echo "==> Setting up systemd service..."
 cp "$ROOT_DIR/deploy/tencent/waronmaps.service" /etc/systemd/system/waronmaps.service
@@ -80,11 +81,11 @@ systemctl enable waronmaps
 
 echo "==> Preparing node data (skip if already present)..."
 if [[ ! -f "$INTERSECTIONS_CSV" ]]; then
-  sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+  sudo -u "$RUN_USER" bash -lc "source '$CARGO_ENV' && cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
   echo "    Fetched OSM road data."
 fi
-sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && '$GENERATE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
-sudo -u "$RUN_USER" bash -lc "source \"\$HOME/.cargo/env\" && cd '$ROOT_DIR' && '$PREPARE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+sudo -u "$RUN_USER" bash -lc "source '$CARGO_ENV' && cd '$ROOT_DIR' && '$GENERATE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
+sudo -u "$RUN_USER" bash -lc "source '$CARGO_ENV' && cd '$ROOT_DIR' && '$PREPARE_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"
 
 echo "==> Starting game server..."
 systemctl restart waronmaps
