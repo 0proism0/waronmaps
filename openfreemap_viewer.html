@@ -189,14 +189,14 @@
       </div>
     </div>
   </div>
-  <button id="showPanelButton" class="show-panel-button" type="button">☰ Menu</button>
   <div id="sendModePanel" class="overlay send-mode-panel hidden">
     <div class="mode-toggle">
-      <button id="sendModeFixedButton" type="button" class="secondary active">Fixed</button>
-      <button id="sendModeRelativeButton" type="button" class="secondary">Relative</button>
+      <button id="sendModeFixedButton" type="button" class="secondary active" title="Fixed: every link sends this exact amount each tick">📌 Fixed</button>
+      <button id="sendModeRelativeButton" type="button" class="secondary" title="Relative: 1st link sends the base, each new link sends +1 more">📈 Relative</button>
     </div>
-    <div id="sendAmountLabel" class="hint">army per tick</div>
+    <div id="sendAmountLabel" class="hint">📌 same amount every link</div>
     <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
+    <div id="sendModeHint" class="hint">Fixed 📌 sends this exact army amount on every link, every tick.</div>
   </div>
   <div id="bottomBar" class="bottom-bar">
     <button id="bottomMenuButton" class="round-button" type="button" title="Menu">☰</button>
@@ -340,7 +340,6 @@
     const FEATURE_BUILDINGS = false;
     const panelEl = document.getElementById("panel");
     const panelTitleEl = document.getElementById("panelTitle");
-    const showPanelButton = document.getElementById("showPanelButton");
     const hidePanelButton = document.getElementById("hidePanelButton");
     const locateNodesButton = document.getElementById("locateNodesButton");
     const refreshLeaderboardButton = document.getElementById("refreshLeaderboardButton");
@@ -374,6 +373,7 @@
     const nodeInfoPositionEl = document.getElementById("nodeInfoPosition");
     const sendPerTickInput = document.getElementById("sendPerTickInput");
     const sendAmountLabel = document.getElementById("sendAmountLabel");
+    const sendModeHint = document.getElementById("sendModeHint");
     const sendModeFixedButton = document.getElementById("sendModeFixedButton");
     const sendModeRelativeButton = document.getElementById("sendModeRelativeButton");
     const sendModePanel = document.getElementById("sendModePanel");
@@ -492,8 +492,11 @@
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
       sendAmountLabel.textContent = sendMode === "fixed"
-        ? "army per tick"
-        : "base army per tick (+1 each new link)";
+        ? "📌 same amount every link"
+        : "📈 base per tick, +1 for each new link";
+      sendModeHint.textContent = sendMode === "fixed"
+        ? "Fixed 📌 sends this exact army amount on every link, every tick."
+        : "Relative 📈: your 1st link sends the base amount, your 2nd link sends base+1, 3rd sends base+2, and so on.";
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
@@ -1203,9 +1206,6 @@
         ? findAttackFeature(selectedNodeId, inspectedId)
         : null;
       if (routeFeature) {
-        const routeSendMode = String(routeFeature.properties?.sendMode || "fixed");
-        setSendMode(routeSendMode);
-        setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
         updateRouteRateButton.disabled = !sessionToken;
         routeInfoHintEl.textContent = `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`;
         return;
@@ -1367,12 +1367,10 @@
     }
     function hideMainPanel(persist = true) {
       panelEl.classList.add("hidden");
-      showPanelButton.classList.add("visible");
       if (persist) savePanelState();
     }
     function showMainPanel(persist = true) {
       panelEl.classList.remove("hidden");
-      showPanelButton.classList.remove("visible");
       if (persist) savePanelState();
     }
     function installButtonPressEffects() {
@@ -1409,7 +1407,6 @@
       }
     }
     hidePanelButton.addEventListener("click", () => { hideMainPanel(true); });
-    showPanelButton.addEventListener("click", () => { showMainPanel(true); });
     bottomMenuButton?.addEventListener("click", () => { showMainPanel(true); });
     bottomLocateButton?.addEventListener("click", () => { locateNodesButton.click(); });
     bottomConnectionsButton?.addEventListener("click", () => {
@@ -2287,14 +2284,6 @@
       selectedNodeFeature = feature;
       hoveredAttackKey = null;
       selectedNodeTextEl.textContent = selectedNodeSummary(feature);
-      const activeRoute = findAttackFeature(nodeId, inspectedNodeId);
-      if (activeRoute) {
-        const routeSendMode = String(activeRoute.properties?.sendMode || "fixed");
-        setSendMode(routeSendMode);
-        setSendPerTickValue(activeRoute.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
-      } else {
-        setSendPerTickValue(sendPerTickInput.value);
-      }
       clearConnectableTargets();
       void refreshSelectedNodeTargets();
       setStatus(statusMessage || `Selected node ${nodeId}. Hold Space and drag to an adjacent node to link.`);
