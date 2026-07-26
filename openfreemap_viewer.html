@@ -205,7 +205,6 @@
     <div class="mode-toggle">
       <button id="sendModeFixedButton" type="button" class="secondary active" title="Fixed: every link sends this exact amount each tick">📌 Fixed</button>
       <button id="sendModeRelativeButton" type="button" class="secondary" title="Relative: 1st link sends the base, each new link sends +1 more">📈 Relative</button>
-      <button id="sendModeLongButton" type="button" class="secondary" title="Long: connect any node by road; rate set by system, farther = slower">🛣️ Long</button>
     </div>
     <div id="sendAmountLabel" class="hint">📌 same amount every link</div>
     <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
@@ -403,7 +402,6 @@
     const sendModeHint = document.getElementById("sendModeHint");
     const sendModeFixedButton = document.getElementById("sendModeFixedButton");
     const sendModeRelativeButton = document.getElementById("sendModeRelativeButton");
-    const sendModeLongButton = document.getElementById("sendModeLongButton");
     const sendModePanel = document.getElementById("sendModePanel");
     const bottomMenuButton = document.getElementById("bottomMenuButton");
     const bottomLocateButton = document.getElementById("bottomLocateButton");
@@ -518,23 +516,15 @@
       return clamp(parsed, 1, 100);
     }
     function setSendMode(mode) {
-      sendMode = ["fixed", "relative", "long"].includes(mode) ? mode : "fixed";
+      sendMode = mode === "relative" ? "relative" : "fixed";
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
-      sendModeLongButton.classList.toggle("active", sendMode === "long");
-      if (sendMode === "long") {
-        sendAmountLabel.textContent = "🛣️ rate set by system";
-        sendModeHint.textContent = "Long 🛣️: connect any node by road. The farther the target, the slower the army flow (set by the system).";
-        sendPerTickInput.disabled = true;
-      } else {
-        sendPerTickInput.disabled = false;
-        sendAmountLabel.textContent = sendMode === "fixed"
-          ? "📌 same amount every link"
-          : "📈 increase per link (x)";
-        sendModeHint.textContent = sendMode === "fixed"
-          ? "Fixed 📌 sends this exact army amount on every link, every tick."
-          : "Relative 📈: your 1st link sends x, your 2nd link sends 2x, 3rd sends 3x, and so on.";
-      }
+      sendAmountLabel.textContent = sendMode === "fixed"
+        ? "📌 same amount every link"
+        : "📈 increase per link (x)";
+      sendModeHint.textContent = sendMode === "fixed"
+        ? "Fixed 📌 sends this exact army amount on every link, every tick."
+        : "Relative 📈: your 1st link sends x, your 2nd link sends 2x, 3rd sends 3x, and so on.";
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
@@ -1024,18 +1014,12 @@
         || null;
       let isAdjacentTarget = connectableNodeIds.has(String(targetNodeId))
         || selectedNodeTargets.some((feature) => String(feature?.properties?.id || "") === String(targetNodeId));
-      if (!activeRoute && !isAdjacentTarget && sendMode !== "long") {
+      if (!activeRoute && !isAdjacentTarget) {
         await refreshSelectedNodeTargets();
         targetFeature = selectedNodeTargets.find((feature) => String(feature?.properties?.id || "") === String(targetNodeId))
           || targetFeature;
         isAdjacentTarget = connectableNodeIds.has(String(targetNodeId))
           || selectedNodeTargets.some((feature) => String(feature?.properties?.id || "") === String(targetNodeId));
-      }
-      if (!activeRoute && !isAdjacentTarget && sendMode !== "long") {
-        if (String(targetFeature?.properties?.ownerState || "") === "self") {
-          selectSenderNode(targetFeature, `Selected node ${targetNodeId}.`);
-          return;
-        }
       }
       const sendPerTick = normalizeSendPerTick(sendPerTickInput.value);
       const sendPercent = normalizeSendPercent(sendPerTickInput.value);
@@ -2427,10 +2411,7 @@
         if (!targetId || targetId === fromNodeId) {
           return false;
         }
-        if (sendMode === "long") {
-          return true;
-        }
-        return connectableNodeIds.has(targetId);
+        return true;
       });
       if (!candidates.length) {
         return null;
@@ -2531,11 +2512,6 @@
       }
       const targetNodeId = String(targetFeature.properties?.id || "");
       if (!targetNodeId || targetNodeId === fromNodeId) {
-        setStatus(`Link from node ${fromNodeId} cancelled.`);
-        return;
-      }
-      if (sendMode !== "long" && !connectableNodeIds.has(targetNodeId)) {
-        showToast("That node is not adjacent to the source node.", "info");
         setStatus(`Link from node ${fromNodeId} cancelled.`);
         return;
       }
@@ -3639,7 +3615,6 @@
     usernameInput.addEventListener("input", saveLoginFormState);
     sendModeFixedButton.addEventListener("click", () => setSendMode("fixed"));
     sendModeRelativeButton.addEventListener("click", () => setSendMode("relative"));
-    sendModeLongButton.addEventListener("click", () => setSendMode("long"));
     sendPerTickInput.addEventListener("change", () => {
       setSendPerTickValue(sendPerTickInput.value);
       updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);

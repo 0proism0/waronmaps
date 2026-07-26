@@ -2292,10 +2292,6 @@ impl App {
         if source.owner_id.as_deref() != Some(player_id) {
             return Err("You can only connect from your own node.".to_string());
         }
-        let immediate_targets = self.immediate_neighbor_targets_locked(data, from_node_id)?;
-        if immediate_targets.iter().any(|node_id| node_id == to_node_id) {
-            return Err("That node is adjacent. Use a normal connection instead.".to_string());
-        }
         let path = self.simplify_connection_path(&self.find_road_path_locked(data, from_node_id, to_node_id)?);
         if path.len() < 2 {
             return Err("No road path found between those nodes.".to_string());
@@ -2816,15 +2812,11 @@ impl App {
         }
         let send_mode = sanitize_send_mode(send_mode);
         let send_percent = sanitize_send_percent(send_percent.unwrap_or(10));
-        let (mode, path, computed_rate) = if send_mode == "long" {
-            let (mode, path, _, rate) = self.resolve_long_distance_connection_locked(
-                &mut data,
-                &session.player_id,
-                from_node_id,
-                to_node_id,
-            )?;
-            (mode, path, rate)
-        } else {
+        let is_adjacent = {
+            let immediate_targets = self.immediate_neighbor_targets_locked(&mut data, from_node_id)?;
+            immediate_targets.iter().any(|node_id| node_id == to_node_id)
+        };
+        let (mode, path, computed_rate) = if is_adjacent {
             let (mode, path, _) =
                 self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
             let base_rate = sanitize_send_per_tick(send_per_tick);
@@ -2840,6 +2832,14 @@ impl App {
                 base_rate
             };
             (mode, path, computed_rate)
+        } else {
+            let (mode, path, _, rate) = self.resolve_long_distance_connection_locked(
+                &mut data,
+                &session.player_id,
+                from_node_id,
+                to_node_id,
+            )?;
+            (mode, path, rate)
         };
         let attack_id = random_id("attack");
         data.state.attacks.insert(
