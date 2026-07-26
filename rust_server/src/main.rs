@@ -2873,6 +2873,8 @@ impl App {
             "/" => PathBuf::from("openfreemap_viewer.html"),
             "/openfreemap_viewer.html" => PathBuf::from("openfreemap_viewer.html"),
             "/sw.js" => PathBuf::from("sw.js"),
+            "/browsericon.png" => PathBuf::from("browsericon.png"),
+            "/favicon.ico" => PathBuf::from("browsericon.png"),
             "/vendor/maplibre-gl.js" => PathBuf::from("vendor/maplibre-gl.js"),
             "/vendor/maplibre-gl.css" => PathBuf::from("vendor/maplibre-gl.css"),
             _ => {
