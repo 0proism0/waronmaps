@@ -2452,25 +2452,35 @@ impl App {
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
-        let mut scores = HashMap::<String, (usize, i64)>::new();
-        for node in data.state.nodes.values() {
+        let mut scores = HashMap::<String, (usize, i64, f64, f64)>::new();
+        for (node_id, node) in data.state.nodes.iter() {
             if let Some(owner_id) = node.owner_id.as_ref() {
-                let entry = scores.entry(owner_id.clone()).or_insert((0, 0));
+                let entry = scores.entry(owner_id.clone()).or_insert((0, 0, 0.0, 0.0));
                 entry.0 += 1;
                 entry.1 += node.army.max(0);
+                if let Some(coord) = data.node_repo.coords_by_id.get(node_id) {
+                    entry.2 += coord.lat;
+                    entry.3 += coord.lon;
+                }
             }
         }
         let mut leaderboard = Vec::new();
-        for (player_id, (nodes, army)) in scores {
+        for (player_id, (nodes, army, lat_sum, lon_sum)) in scores {
             if let Some(player) = data.state.players.get(&player_id) {
                 if Self::is_test_or_bot_username(&player.username) || player.is_guest {
                     continue;
                 }
+                let center = if nodes > 0 {
+                    Some(json!([lon_sum / nodes as f64, lat_sum / nodes as f64]))
+                } else {
+                    None
+                };
                 leaderboard.push(json!({
                     "playerId": player_id,
                     "username": player.username,
                     "nodes": nodes,
                     "army": army,
+                    "center": center,
                 }));
             }
         }

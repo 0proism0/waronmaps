@@ -69,6 +69,12 @@
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .discord-icon-button { width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: #fff; background: #5865F2; box-shadow: 0 6px 14px rgba(88, 101, 242, 0.35); transition: transform 0.12s ease, background 0.15s ease; }
     .discord-icon-button:hover { transform: translateY(-2px); background: #4752c4; }
+    .tutorial-highlight { background: linear-gradient(90deg, #f59e0b, #f97316) !important; box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.5), 0 8px 22px rgba(249, 115, 22, 0.45) !important; animation: tutorialPulse 1.8s ease-in-out infinite; }
+    .tutorial-highlight:hover { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.75), 0 10px 26px rgba(249, 115, 22, 0.6) !important; }
+    @keyframes tutorialPulse {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.5), 0 8px 22px rgba(249, 115, 22, 0.45); }
+      50% { box-shadow: 0 0 0 5px rgba(251, 191, 36, 0.85), 0 8px 26px rgba(249, 115, 22, 0.65); }
+    }
     .section { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
     .section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
     .section-title { font-size: 13px; font-weight: 700; color: #e2e8f0; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
@@ -84,7 +90,8 @@
     .panel-close { width: 32px; height: 32px; padding: 0; border-radius: 999px; font-size: 18px; background: rgba(30, 41, 59, 0.8); box-shadow: none; }
     .panel-close:hover { background: rgba(51, 65, 85, 0.9); }
     .leaderboard-list { display: grid; gap: 6px; }
-    .leaderboard-row { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(30, 41, 59, 0.45); }
+    .leaderboard-row { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(30, 41, 59, 0.45); cursor: pointer; transition: background 0.15s ease, transform 0.12s ease; }
+    .leaderboard-row:hover { background: rgba(51, 65, 85, 0.75); transform: translateX(2px); }
     .leaderboard-row.self { background: rgba(37, 99, 235, 0.18); border: 1px solid rgba(96, 165, 250, 0.35); }
     .leaderboard-rank { font-size: 12px; font-weight: 800; color: #94a3b8; text-align: center; }
     .leaderboard-row.self .leaderboard-rank { color: #60a5fa; }
@@ -178,7 +185,7 @@
       <div class="section">
         <div class="actions">
           <button id="locateNodesButton" type="button">Locate My Nodes</button>
-          <button id="showTutorialButton" type="button" class="secondary">How to Play</button>
+          <button id="showTutorialButton" type="button" class="tutorial-highlight">❓ How to Play</button>
           <a id="discordLink" class="discord-icon-button" href="https://discord.gg/ggH2r4WZc" target="_blank" rel="noopener" title="Join our Discord">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.058a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.418 2.157-2.418 1.21 0 2.176 1.096 2.157 2.418 0 1.334-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.418 2.157-2.418 1.21 0 2.176 1.096 2.157 2.418 0 1.334-.946 2.418-2.157 2.418z"/></svg>
           </a>
@@ -1464,6 +1471,16 @@
 
         const rowEl = document.createElement("div");
         rowEl.className = `leaderboard-row${isSelf ? " self" : ""}`;
+        rowEl.title = `Click to fly to ${username}'s territory`;
+        rowEl.addEventListener("click", () => {
+          const center = Array.isArray(entry.center) ? entry.center : null;
+          if (center && center.length >= 2) {
+            map.flyTo({ center: [center[0], center[1]], zoom: 12, essential: true });
+            showToast(`Flying to ${username}'s territory.`, "info");
+          } else {
+            showToast(`${username} has no nodes on the map.`, "info");
+          }
+        });
 
         const rankEl = document.createElement("div");
         rankEl.className = "leaderboard-rank";
