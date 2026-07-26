@@ -79,6 +79,13 @@ sed -i "s|__USER__|$RUN_USER|g" /etc/systemd/system/waronmaps.service
 systemctl daemon-reload
 systemctl enable waronmaps
 
+if [[ ! -f /etc/waronmaps.env ]]; then
+  cat > /etc/waronmaps.env <<'EOF'
+# Set your Neon connection string, then restart the service:
+# DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+EOF
+fi
+
 echo "==> Preparing node data (skip if already present)..."
 if [[ ! -f "$INTERSECTIONS_CSV" ]]; then
   sudo -u "$RUN_USER" bash -lc "source '$CARGO_ENV' && cd '$ROOT_DIR' && '$FETCH_BIN' '$ROOT_DIR' >> '$RUNTIME_DIR/builder.log' 2>&1"

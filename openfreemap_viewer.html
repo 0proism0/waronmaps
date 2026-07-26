@@ -125,9 +125,13 @@
     }
     #startLocationOverlay { pointer-events: none; }
     #startLocationOverlay .tutorial-card { pointer-events: auto; }
-    .send-mode-panel { left: 16px; bottom: 16px; width: min(220px, calc(100vw - 32px)); padding: 12px; z-index: 4; }
+    .send-mode-panel { left: 16px; bottom: 76px; width: min(220px, calc(100vw - 32px)); padding: 12px; z-index: 7; }
     .send-mode-panel input { margin: 0; }
     .send-mode-panel .mode-toggle { margin-bottom: 6px; }
+    .bottom-bar { position: absolute; left: 16px; bottom: 16px; z-index: 6; display: flex; gap: 10px; }
+    .round-button { width: 48px; height: 48px; padding: 0; border-radius: 999px; border: 0; font-size: 20px; line-height: 1; background: rgba(15, 23, 42, 0.85); color: #f8fafc; box-shadow: 0 8px 18px rgba(2, 6, 23, 0.45); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .round-button:hover { background: rgba(30, 41, 59, 0.95); }
+    .round-button.active { background: linear-gradient(90deg, #2563eb, #4f46e5); box-shadow: 0 8px 18px rgba(37, 99, 235, 0.35); }
     #connectionTargetsSection { display: none !important; }
     #startNodeAction { display: none !important; }
     .hidden { display: none !important; }
@@ -180,13 +184,19 @@
     </div>
   </div>
   <button id="showPanelButton" class="show-panel-button" type="button">☰ Menu</button>
-  <div id="sendModePanel" class="overlay send-mode-panel">
+  <div id="sendModePanel" class="overlay send-mode-panel hidden">
     <div class="mode-toggle">
       <button id="sendModeFixedButton" type="button" class="secondary active">Fixed</button>
       <button id="sendModeRelativeButton" type="button" class="secondary">Relative</button>
     </div>
     <div id="sendAmountLabel" class="hint">army per tick</div>
     <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
+  </div>
+  <div id="bottomBar" class="bottom-bar">
+    <button id="bottomMenuButton" class="round-button" type="button" title="Menu">☰</button>
+    <button id="bottomLocateButton" class="round-button" type="button" title="Locate my nodes">⚑</button>
+    <button id="bottomConnectionsButton" class="round-button" type="button" title="Connections">🔗</button>
+    <button id="bottomHelpButton" class="round-button" type="button" title="How to play">?</button>
   </div>
   <div class="overlay node-info hidden" id="nodeInfo">
     <div class="node-info-header">
@@ -359,6 +369,11 @@
     const sendAmountLabel = document.getElementById("sendAmountLabel");
     const sendModeFixedButton = document.getElementById("sendModeFixedButton");
     const sendModeRelativeButton = document.getElementById("sendModeRelativeButton");
+    const sendModePanel = document.getElementById("sendModePanel");
+    const bottomMenuButton = document.getElementById("bottomMenuButton");
+    const bottomLocateButton = document.getElementById("bottomLocateButton");
+    const bottomConnectionsButton = document.getElementById("bottomConnectionsButton");
+    const bottomHelpButton = document.getElementById("bottomHelpButton");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
     const connectionCanvasEl = document.getElementById("connectionCanvas");
@@ -471,29 +486,23 @@
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
       sendAmountLabel.textContent = sendMode === "fixed"
         ? "army per tick"
-        : "% of source army";
-      sendPerTickInput.max = sendMode === "fixed" ? "250" : "100";
+        : "base army per tick (+1 each new link)";
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
-      if (sendMode === "relative") {
-        sendPerTickInput.value = String(normalizeSendPercent(value));
-      } else {
-        sendPerTickInput.value = String(normalizeSendPerTick(value));
-      }
+      sendPerTickInput.value = String(normalizeSendPerTick(value));
     }
     function currentSendAmount() {
-      return sendMode === "relative"
-        ? normalizeSendPercent(sendPerTickInput.value)
-        : normalizeSendPerTick(sendPerTickInput.value);
+      return normalizeSendPerTick(sendPerTickInput.value);
     }
     function configuredSendRateForSource(sourceArmy) {
       const army = Math.max(0, Math.floor(Number(sourceArmy) || 0));
+      const base = normalizeSendPerTick(sendPerTickInput.value);
       if (sendMode === "relative") {
-        const percent = normalizeSendPercent(sendPerTickInput.value);
-        return Math.max(0, Math.min(Math.floor((army * percent) / 100), army));
+        const activeConnections = currentAttackFeatures.filter((feature) => String(feature?.properties?.ownerState || "") === "self").length;
+        return Math.max(0, Math.min(base + activeConnections, army));
       }
-      return Math.min(normalizeSendPerTick(sendPerTickInput.value), army);
+      return Math.min(base, army);
     }
     function formatRatePerSecond(valuePerTick) {
       const perSecond = valuePerTick / WORLD_TICK_SECONDS;
@@ -758,15 +767,12 @@
         const fromNodeId = String(attackFeature?.properties?.fromNodeId || "");
         const toNodeId = String(attackFeature?.properties?.toNodeId || "");
         const configuredSendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
-        const configuredSendMode = String(attackFeature?.properties?.sendMode || "fixed");
         const sourceState = nodeState.get(fromNodeId);
         if (!sourceState || sourceState.army <= 0) {
           effectiveFlowByAttackKey.set(key, 0);
           continue;
         }
-        const effectiveSendPerTick = configuredSendMode === "relative"
-          ? Math.max(0, Math.min(Math.floor((sourceState.army * normalizeSendPercent(attackFeature?.properties?.sendPercent || DEFAULT_SEND_PERCENT)) / 100), Math.floor(sourceState.army)))
-          : Math.max(0, Math.min(configuredSendPerTick, Math.floor(sourceState.army)));
+        const effectiveSendPerTick = Math.max(0, Math.min(configuredSendPerTick, Math.floor(sourceState.army)));
         sourceState.army = Math.max(0, sourceState.army - effectiveSendPerTick);
         const targetState = nodeState.get(toNodeId);
         if (targetState) {
@@ -924,7 +930,7 @@
         ));
         setAttackFeatures(nextFeatures);
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || null);
-        const rateLabel = sendMode === "relative" ? `${sendPercent}%` : `${normalizeSendPerTick(sendPerTick).toLocaleString()}/tick`;
+        const rateLabel = `${normalizeSendPerTick(sendPerTick).toLocaleString()}/tick`;
         showToast(`Route ${fromNodeId} -> ${toNodeId} set to ${rateLabel}.`, "success");
         void refreshGameState();
       } catch (error) {
@@ -1020,10 +1026,10 @@
           ));
           nextFeatures.push(response.attack);
           setAttackFeatures(nextFeatures);
-          const rateLabel = sendMode === "relative" ? `${sendPercent}%` : formatTickRate(sendPerTick);
+          const computedRate = Number(response.attack?.properties?.sendPerTick || sendPerTick);
           showToast(String(targetFeature?.properties?.ownerState || "") === "self"
-            ? `Transfer started at ${rateLabel}.`
-            : `Attack started at ${rateLabel}.`, "success");
+            ? `Transfer started at ${formatTickRate(computedRate)}.`
+            : `Attack started at ${formatTickRate(computedRate)}.`, "success");
         }
         updateSelectionStatus();
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
@@ -1090,12 +1096,11 @@
         const modeEl = document.createElement("div");
         modeEl.className = "route-row-mode";
         const configuredSendPerTick = normalizeSendPerTick(routeFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
-        const configuredSendPercent = normalizeSendPercent(routeFeature?.properties?.sendPercent || DEFAULT_SEND_PERCENT);
         const routeSendMode = String(routeFeature?.properties?.sendMode || "fixed");
         const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? configuredSendPerTick;
         const overlapCount = Number(routeFeature?.properties?.overlapCount || 1);
         modeEl.textContent = routeSendMode === "relative"
-          ? `${String(routeFeature?.properties?.mode || "attack")} · relative ${configuredSendPercent}% · ${effectiveSendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`
+          ? `${String(routeFeature?.properties?.mode || "attack")} · relative · ${effectiveSendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`
           : `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
@@ -1193,11 +1198,7 @@
       if (routeFeature) {
         const routeSendMode = String(routeFeature.properties?.sendMode || "fixed");
         setSendMode(routeSendMode);
-        if (routeSendMode === "relative") {
-          setSendPerTickValue(routeFeature.properties?.sendPercent || DEFAULT_SEND_PERCENT);
-        } else {
-          setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
-        }
+        setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
         updateRouteRateButton.disabled = !sessionToken;
         routeInfoHintEl.textContent = `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`;
         return;
@@ -1402,6 +1403,13 @@
     }
     hidePanelButton.addEventListener("click", () => { hideMainPanel(true); });
     showPanelButton.addEventListener("click", () => { showMainPanel(true); });
+    bottomMenuButton?.addEventListener("click", () => { showMainPanel(true); });
+    bottomLocateButton?.addEventListener("click", () => { locateNodesButton.click(); });
+    bottomConnectionsButton?.addEventListener("click", () => {
+      const isHidden = sendModePanel.classList.toggle("hidden");
+      bottomConnectionsButton.classList.toggle("active", !isHidden);
+    });
+    bottomHelpButton?.addEventListener("click", () => { showTutorialButton.click(); });
     closeNodeInfoButton?.addEventListener("click", () => {
       inspectedNodeId = null;
       updateNodeInfo(null);
@@ -2247,9 +2255,7 @@
       if (activeRoute) {
         const routeSendMode = String(activeRoute.properties?.sendMode || "fixed");
         setSendMode(routeSendMode);
-        setSendPerTickValue(routeSendMode === "relative"
-          ? activeRoute.properties?.sendPercent || DEFAULT_SEND_PERCENT
-          : activeRoute.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        setSendPerTickValue(activeRoute.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
       } else {
         setSendPerTickValue(sendPerTickInput.value);
       }

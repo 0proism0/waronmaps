@@ -1,5 +1,7 @@
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use futures_util::{SinkExt, StreamExt};
+use native_tls::TlsConnector;
+use postgres_native_tls::MakeTlsConnector;
 use geo::{Coord as GeoCoord, LineString, Simplify};
 use rand::random;
 use s2::cellid::CellID;
@@ -388,6 +390,7 @@ struct App {
     region_manifest_path: PathBuf,
     state_boundaries_path: PathBuf,
     display_names_path: PathBuf,
+    db_client: Option<Mutex<postgres::Client>>,
     inner: Mutex<AppData>,
     ws_update_sender: crossbeam_channel::Sender<String>,
 }
@@ -397,7 +400,27 @@ impl App {
         let data_dir = root.join("game_data");
         fs::create_dir_all(&data_dir).map_err(|err| err.to_string())?;
         let state_path = data_dir.join("state.json");
-        let state = read_json_file::<GameState>(&state_path).unwrap_or_else(GameState::new);
+        let database_url = std::env::var("DATABASE_URL").ok();
+        let db_client = if let Some(url) = database_url {
+            match Self::connect_db(&url) {
+                Ok(client) => Some(Mutex::new(client)),
+                Err(err) => {
+                    eprintln!("Failed to connect to Neon: {err}. Falling back to local state.json.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let local_state = read_json_file::<GameState>(&state_path).unwrap_or_else(GameState::new);
+        let state = if let Some(client) = &db_client {
+            Self::load_state_from_db(client, local_state.clone()).unwrap_or_else(|err| {
+                eprintln!("Failed to load state from Neon: {err}. Falling back to local state.json.");
+                local_state
+            })
+        } else {
+            local_state
+        };
         Ok(Self {
             root: root.clone(),
             state_path,
@@ -423,6 +446,7 @@ impl App {
                 .join("local_node_store")
                 .join("northern_new_england")
                 .join("node_display_names.json"),
+            db_client,
             inner: Mutex::new(AppData {
                 state,
                 node_repo: NodeRepo::default(),
@@ -440,10 +464,57 @@ impl App {
         })
     }
 
+    fn connect_db(database_url: &str) -> Result<postgres::Client, String> {
+        let connector = TlsConnector::new().map_err(|err| err.to_string())?;
+        let connector = MakeTlsConnector::new(connector);
+        let mut client = postgres::Client::connect(database_url, connector).map_err(|err| err.to_string())?;
+        client
+            .execute(
+                "CREATE TABLE IF NOT EXISTS game_state (
+                    id TEXT PRIMARY KEY,
+                    state JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )",
+                &[],
+            )
+            .map_err(|err| err.to_string())?;
+        Ok(client)
+    }
+
+    fn load_state_from_db(client: &Mutex<postgres::Client>, fallback_state: GameState) -> Result<GameState, String> {
+        let mut client = client.lock().map_err(|_| "Failed to lock database client.".to_string())?;
+        let row = client
+            .query_opt("SELECT state FROM game_state WHERE id = $1", &[&"main"])
+            .map_err(|err| err.to_string())?;
+        if let Some(row) = row {
+            let value: Value = row.get(0);
+            return serde_json::from_value(value).map_err(|err| err.to_string());
+        }
+        let value = serde_json::to_value(&fallback_state).map_err(|err| err.to_string())?;
+        client
+            .execute(
+                "INSERT INTO game_state (id, state) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+                &[&"main", &value],
+            )
+            .map_err(|err| err.to_string())?;
+        Ok(fallback_state)
+    }
+
     fn save_state_locked(&self, state: &mut GameState) -> Result<(), String> {
         let now = now_ms();
         state.saved_at = now;
         state.last_persisted_at = now;
+        if let Some(client) = &self.db_client {
+            let mut client = client.lock().map_err(|_| "Failed to lock database client.".to_string())?;
+            let value = serde_json::to_value(&*state).map_err(|err| err.to_string())?;
+            client
+                .execute(
+                    "INSERT INTO game_state (id, state, updated_at) VALUES ($1, $2, now())
+                     ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, updated_at = now()",
+                    &[&"main", &value],
+                )
+                .map_err(|err| err.to_string())?;
+        }
         write_json_file(&self.state_path, state)
     }
 
@@ -1920,13 +1991,7 @@ impl App {
                 continue;
             }
 
-            let flow = if attack.send_mode == "relative" {
-                let percent = sanitize_send_percent(attack.send_percent);
-                let amount = (source_snapshot.army * percent) / 100;
-                clamp_i64(amount.max(1), 1, source_snapshot.army.max(1))
-            } else {
-                clamp_i64(attack.send_per_tick.max(1), 1, source_snapshot.army.max(1))
-            };
+            let flow = clamp_i64(attack.send_per_tick.max(1), 1, source_snapshot.army.max(1));
 
             if let Some(source_node) = data.state.nodes.get_mut(&attack.from_node_id) {
                 source_node.army = (source_node.army - flow).max(0);
@@ -2696,6 +2761,18 @@ impl App {
             self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
         let send_mode = sanitize_send_mode(send_mode);
         let send_percent = sanitize_send_percent(send_percent.unwrap_or(10));
+        let base_rate = sanitize_send_per_tick(send_per_tick);
+        let computed_rate = if send_mode == "relative" {
+            let active_connections = data
+                .state
+                .attacks
+                .values()
+                .filter(|attack| attack.owner_id == session.player_id)
+                .count() as i64;
+            clamp_i64(base_rate + active_connections, 1, 250)
+        } else {
+            base_rate
+        };
         let attack_id = random_id("attack");
         data.state.attacks.insert(
             attack_id.clone(),
@@ -2706,7 +2783,7 @@ impl App {
                 from_node_id: from_node_id.to_string(),
                 to_node_id: to_node_id.to_string(),
                 path,
-                send_per_tick: sanitize_send_per_tick(send_per_tick),
+                send_per_tick: computed_rate,
                 send_mode: send_mode.clone(),
                 send_percent,
                 created_at: now_ms(),
@@ -2721,7 +2798,7 @@ impl App {
         Ok(json!({
             "ok": true,
             "attackId": attack_id,
-            "sendPerTick": sanitize_send_per_tick(send_per_tick),
+            "sendPerTick": computed_rate,
             "sendMode": send_mode,
             "sendPercent": send_percent,
             "attack": attack_feature
