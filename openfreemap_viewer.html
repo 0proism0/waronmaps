@@ -125,6 +125,12 @@
     }
     #startLocationOverlay { pointer-events: none; }
     #startLocationOverlay .tutorial-card { pointer-events: auto; }
+    .send-mode-panel { left: 16px; bottom: 16px; width: min(220px, calc(100vw - 32px)); padding: 12px; z-index: 4; }
+    .send-mode-panel input { margin: 0; }
+    .send-mode-panel .mode-toggle { margin-bottom: 6px; }
+    #connectionTargetsSection { display: none !important; }
+    #startNodeAction { display: none !important; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
@@ -174,6 +180,14 @@
     </div>
   </div>
   <button id="showPanelButton" class="show-panel-button" type="button">☰ Menu</button>
+  <div id="sendModePanel" class="overlay send-mode-panel">
+    <div class="mode-toggle">
+      <button id="sendModeFixedButton" type="button" class="secondary active">Fixed</button>
+      <button id="sendModeRelativeButton" type="button" class="secondary">Relative</button>
+    </div>
+    <div id="sendAmountLabel" class="hint">army per tick</div>
+    <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
+  </div>
   <div class="overlay node-info hidden" id="nodeInfo">
     <div class="node-info-header">
       <strong id="nodeInfoTitle">Node Info</strong>
@@ -188,12 +202,6 @@
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
     <div class="route-controls">
-      <label for="sendPerTickInput" id="sendAmountLabel">New connection army per 1s tick</label>
-      <div class="mode-toggle">
-        <button id="sendModeFixedButton" type="button" class="secondary active">Fixed</button>
-        <button id="sendModeRelativeButton" type="button" class="secondary">Relative</button>
-      </div>
-      <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
       <div id="routeInfoHint" class="hint">Hold Space and drag from one of your nodes to an adjacent node to link.</div>
       <div class="actions">
         <button id="updateRouteRateButton" type="button" class="secondary">Update Route Rate</button>
@@ -236,11 +244,11 @@
       </div>
       <div class="tutorial-step" data-step="1">
         <div class="tutorial-title">Find your nodes</div>
-        <div class="tutorial-text">After you claim a neutral node, the map will center on your green nodes. Each node generates +1 army every few seconds, up to a cap of 1 million.</div>
+        <div class="tutorial-text">After you claim a neutral node, the map will center on your owned nodes. Each node generates +1 army every few seconds, up to a cap of 1 million.</div>
       </div>
       <div class="tutorial-step" data-step="2">
         <div class="tutorial-title">Make a connection</div>
-        <div class="tutorial-text">Hold Space and drag from one of your green nodes to an adjacent node. A dotted line will follow your cursor; release on the target to open a road connection that moves troops every tick.</div>
+        <div class="tutorial-text">Hold Space and drag from one of your owned nodes to an adjacent node. A dotted line will follow your cursor; release on the target to open a road connection that moves troops every tick.</div>
       </div>
       <div class="tutorial-step" data-step="3">
         <div class="tutorial-title">Adjust your army flow</div>
@@ -261,7 +269,8 @@
   <div id="startLocationOverlay" class="tutorial-overlay">
     <div class="tutorial-card">
       <div class="tutorial-title">Choose your starting location</div>
-      <div class="tutorial-text">Please choose your starting location. Click any neutral (white/gray) node on the map, then press Claim to begin.</div>
+      <div id="startLocationHint" class="tutorial-text">Please choose your starting location. Click any neutral (white/gray) node on the map, then press Claim to begin.</div>
+      <button id="overlayClaimButton" type="button" class="primary hidden">Claim this node</button>
     </div>
   </div>
   <script src="/vendor/maplibre-gl.js"></script>
@@ -364,6 +373,8 @@
     const startNodeHintEl = document.getElementById("startNodeHint");
     const clearStartNodeButton = document.getElementById("clearStartNodeButton");
     const claimStartNodeButton = document.getElementById("claimStartNodeButton");
+    const overlayClaimButton = document.getElementById("overlayClaimButton");
+    const startLocationHint = document.getElementById("startLocationHint");
 
     let activeRegion = null;
     let buildPollTimer = null;
@@ -386,6 +397,7 @@
     let renderedNodeFeatureMap = new Map();
     let selectedNodeFeature = null;
     let selectedStartNodeId = null;
+    let lastNodeRouteListKey = "";
     let sendMode = "fixed";
     updateAuthButtonsVisibility();
     let spacePressed = false;
@@ -458,8 +470,8 @@
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
       sendAmountLabel.textContent = sendMode === "fixed"
-        ? "New connection army per 1s tick"
-        : "New connection percentage of source army (%)";
+        ? "army per tick"
+        : "% of source army";
       sendPerTickInput.max = sendMode === "fixed" ? "250" : "100";
       setSendPerTickValue(sendPerTickInput.value);
     }
@@ -768,13 +780,19 @@
       }
       return effectiveFlowByAttackKey;
     }
+    function nodeDisplayNameById(nodeId) {
+      const feature = renderedNodeFeatures.find((item) => String(item?.properties?.id || "") === String(nodeId));
+      return feature?.properties?.displayName || "Intersection";
+    }
     function routeSummaryLabel(feature, nodeId) {
       const fromId = String(feature?.properties?.fromNodeId || "");
       const toId = String(feature?.properties?.toNodeId || "");
+      const toName = nodeDisplayNameById(toId);
+      const fromName = nodeDisplayNameById(fromId);
       if (fromId === nodeId) {
-        return `Outgoing ${fromId} -> ${toId}`;
+        return `Outgoing to ${toName}`;
       }
-      return `Incoming ${fromId} -> ${toId}`;
+      return `Incoming from ${fromName}`;
     }
     function setAttackFeatures(features) {
       const serverFeatures = collapseOverlappingAttackFeatures(features || []);
@@ -1029,12 +1047,28 @@
     }
     function renderNodeRouteList(feature = null) {
       if (!feature) {
+        lastNodeRouteListKey = "";
         nodeRoutesSectionEl.classList.add("hidden");
         nodeRoutesListEl.replaceChildren();
         return;
       }
       const nodeId = String(feature?.properties?.id || "");
       const routes = attacksForNode(nodeId);
+      const routeListKey = `${nodeId}|${routes
+        .map((route) => [
+          String(route?.properties?.fromNodeId || ""),
+          String(route?.properties?.toNodeId || ""),
+          String(route?.properties?.mode || ""),
+          String(route?.properties?.sendMode || "fixed"),
+          String(route?.properties?.sendPercent || DEFAULT_SEND_PERCENT),
+          String(route?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK),
+          String(route?.properties?.ownerState || ""),
+        ].join(":"))
+        .join("|")}`;
+      if (routeListKey === lastNodeRouteListKey) {
+        return;
+      }
+      lastNodeRouteListKey = routeListKey;
       if (!routes.length) {
         nodeRoutesSectionEl.classList.add("hidden");
         nodeRoutesListEl.replaceChildren();
@@ -1165,7 +1199,7 @@
           setSendPerTickValue(routeFeature.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
         }
         updateRouteRateButton.disabled = !sessionToken;
-        routeInfoHintEl.textContent = `Route ${selectedNodeId} -> ${inspectedId} is active. Update it here or click again to remove it.`;
+        routeInfoHintEl.textContent = `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`;
         return;
       }
       updateRouteRateButton.disabled = true;
@@ -1784,7 +1818,8 @@
       if (!feature) {
         return "None";
       }
-      return `${feature.properties.id} (${Number(feature.properties.army || 0).toLocaleString()} army)`;
+      const name = feature.properties?.displayName || "Intersection";
+      return `${name} (${Number(feature.properties.army || 0).toLocaleString()} army)`;
     }
 
     function nodeOwnerLabel(feature) {
@@ -1825,9 +1860,9 @@
       nodeInfoEl.classList.remove("hidden");
       const coords = actualNodeCoordinates(feature);
       const perTick = nodeNetPerTick(feature);
-      const displayName = feature.properties?.displayName || `Node ${feature.properties?.id || "Unknown"}`;
+      const displayName = feature.properties?.displayName || "Intersection";
       nodeInfoTitleEl.textContent = displayName;
-      nodeInfoIdEl.textContent = String(feature.properties?.id || "Unknown");
+      nodeInfoIdEl.textContent = displayName;
       nodeInfoOwnerEl.textContent = nodeOwnerLabel(feature);
       nodeInfoArmyEl.textContent = Number(feature.properties?.army || 0).toLocaleString();
       nodeInfoDeltaEl.textContent = formatSignedTickRate(perTick.net);
@@ -2115,6 +2150,21 @@
     function updateStartLocationOverlay() {
       const needsStart = Boolean(sessionToken && lastOwnedFeatures.length === 0);
       startLocationOverlay.classList.toggle("show", needsStart);
+      if (!needsStart) {
+        overlayClaimButton.classList.add("hidden");
+        return;
+      }
+      const selectedFeature = selectedStartNodeId
+        ? renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === selectedStartNodeId)
+        : null;
+      if (selectedFeature) {
+        const name = selectedFeature.properties?.displayName || "Intersection";
+        startLocationHint.textContent = `Selected: ${name}. Press Claim to start your territory here.`;
+        overlayClaimButton.classList.remove("hidden");
+      } else {
+        startLocationHint.textContent = "Please choose your starting location. Click any neutral (white/gray) node on the map, then press Claim to begin.";
+        overlayClaimButton.classList.add("hidden");
+      }
     }
 
     async function claimStartNode(nodeId) {
@@ -2872,11 +2922,12 @@
         inspectNode(feature);
         if (props.ownerState === "neutral") {
           selectedStartNodeId = nodeId;
-          showToast(`Node ${nodeId} selected. Click Claim to start your territory.`, "info");
+          showToast(`${props.displayName || "Intersection"} selected. Click Claim to start your territory.`, "info");
         } else {
           selectedStartNodeId = null;
         }
         updateStartNodeAction(feature);
+        updateStartLocationOverlay();
         return;
       }
       if (selectedNodeId === nodeId) {
@@ -3406,6 +3457,11 @@
     guestButton.addEventListener("click", () => submitGuest());
     clearStartNodeButton.addEventListener("click", clearStartNode);
     claimStartNodeButton.addEventListener("click", () => {
+      if (selectedStartNodeId) {
+        void claimStartNode(selectedStartNodeId);
+      }
+    });
+    overlayClaimButton.addEventListener("click", () => {
       if (selectedStartNodeId) {
         void claimStartNode(selectedStartNodeId);
       }
