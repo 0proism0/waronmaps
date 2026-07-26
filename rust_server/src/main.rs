@@ -2267,6 +2267,53 @@ impl App {
         Ok((mode.to_string(), path, owner_state.to_string()))
     }
 
+    fn resolve_long_distance_connection_locked(
+        &self,
+        data: &mut AppData,
+        player_id: &str,
+        from_node_id: &str,
+        to_node_id: &str,
+    ) -> Result<(String, Vec<[f64; 2]>, String, i64), String> {
+        if from_node_id == to_node_id {
+            return Err("Select a different target node.".to_string());
+        }
+        let source = data
+            .state
+            .nodes
+            .get(from_node_id)
+            .cloned()
+            .ok_or_else(|| "Invalid nodes.".to_string())?;
+        let target = data
+            .state
+            .nodes
+            .get(to_node_id)
+            .cloned()
+            .ok_or_else(|| "Invalid nodes.".to_string())?;
+        if source.owner_id.as_deref() != Some(player_id) {
+            return Err("You can only connect from your own node.".to_string());
+        }
+        let immediate_targets = self.immediate_neighbor_targets_locked(data, from_node_id)?;
+        if immediate_targets.iter().any(|node_id| node_id == to_node_id) {
+            return Err("That node is adjacent. Use a normal connection instead.".to_string());
+        }
+        let path = self.simplify_connection_path(&self.find_road_path_locked(data, from_node_id, to_node_id)?);
+        if path.len() < 2 {
+            return Err("No road path found between those nodes.".to_string());
+        }
+        let mut distance_km = 0.0;
+        for pair in path.windows(2) {
+            distance_km += haversine_km(pair[0][1], pair[0][0], pair[1][1], pair[1][0]);
+        }
+        let rate = ((10.0 / (1.0 + distance_km)).ceil() as i64).clamp(1, 10);
+        let mode = if target.owner_id.as_deref() == Some(player_id) {
+            "transfer"
+        } else {
+            "attack"
+        };
+        let owner_state = if mode == "transfer" { "self" } else { "enemy" };
+        Ok((mode.to_string(), path, owner_state.to_string(), rate))
+    }
+
     fn world_feature_locked(
         &self,
         data: &AppData,
@@ -2767,21 +2814,32 @@ impl App {
             self.save_state_locked(&mut data.state)?;
             return Ok(json!({ "ok": true, "removed": true, "attackId": attack_id }));
         }
-        let (mode, path, _) =
-            self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
         let send_mode = sanitize_send_mode(send_mode);
         let send_percent = sanitize_send_percent(send_percent.unwrap_or(10));
-        let base_rate = sanitize_send_per_tick(send_per_tick);
-        let computed_rate = if send_mode == "relative" {
-            let active_connections = data
-                .state
-                .attacks
-                .values()
-                .filter(|attack| attack.owner_id == session.player_id)
-                .count() as i64;
-            clamp_i64(base_rate + active_connections, 1, 250)
+        let (mode, path, computed_rate) = if send_mode == "long" {
+            let (mode, path, _, rate) = self.resolve_long_distance_connection_locked(
+                &mut data,
+                &session.player_id,
+                from_node_id,
+                to_node_id,
+            )?;
+            (mode, path, rate)
         } else {
-            base_rate
+            let (mode, path, _) =
+                self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
+            let base_rate = sanitize_send_per_tick(send_per_tick);
+            let computed_rate = if send_mode == "relative" {
+                let active_connections = data
+                    .state
+                    .attacks
+                    .values()
+                    .filter(|attack| attack.owner_id == session.player_id)
+                    .count() as i64;
+                clamp_i64(base_rate * (active_connections + 1), 1, 250)
+            } else {
+                base_rate
+            };
+            (mode, path, computed_rate)
         };
         let attack_id = random_id("attack");
         data.state.attacks.insert(
@@ -3255,6 +3313,7 @@ fn sanitize_send_per_tick(value: i64) -> i64 {
 fn sanitize_send_mode(value: Option<&str>) -> String {
     match value.map(|s| s.trim().to_lowercase()).as_deref() {
         Some("relative") => "relative".to_string(),
+        Some("long") => "long".to_string(),
         _ => "fixed".to_string(),
     }
 }

@@ -112,6 +112,11 @@
     .leaderboard-panel { position: absolute; top: 16px; left: 16px; z-index: 3; width: min(280px, calc(100vw - 32px)); max-height: min(380px, calc(100vh - 160px)); overflow-y: auto; padding: 14px 16px; color: #f8fafc; background: rgba(15, 23, 42, 0.82); backdrop-filter: blur(14px); box-shadow: 0 20px 50px rgba(2, 6, 23, 0.55); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 18px; }
     .leaderboard-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: 14px; font-weight: 800; color: #e2e8f0; }
     .leaderboard-panel-header button { padding: 5px 10px; font-size: 12px; }
+    .leaderboard-header-actions { display: flex; gap: 6px; }
+    .leaderboard-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+    .leaderboard-tab { flex: 1; padding: 6px 8px; font-size: 12px; border-radius: 8px; }
+    .leaderboard-tab.active { background: linear-gradient(90deg, #2563eb, #4f46e5); box-shadow: 0 6px 14px rgba(37, 99, 235, 0.3); }
+    .leaderboard-panel.collapsed #leaderboardBody { display: none; }
 
     .tutorial-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 23, 0.75); backdrop-filter: blur(4px); opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease; }
     .tutorial-overlay.show { opacity: 1; visibility: visible; }
@@ -200,6 +205,7 @@
     <div class="mode-toggle">
       <button id="sendModeFixedButton" type="button" class="secondary active" title="Fixed: every link sends this exact amount each tick">📌 Fixed</button>
       <button id="sendModeRelativeButton" type="button" class="secondary" title="Relative: 1st link sends the base, each new link sends +1 more">📈 Relative</button>
+      <button id="sendModeLongButton" type="button" class="secondary" title="Long: connect any node by road; rate set by system, farther = slower">🛣️ Long</button>
     </div>
     <div id="sendAmountLabel" class="hint">📌 same amount every link</div>
     <input id="sendPerTickInput" type="number" min="1" max="250" step="1" value="1">
@@ -209,6 +215,7 @@
     <button id="bottomMenuButton" class="round-button" type="button" title="Menu">☰</button>
     <button id="bottomLocateButton" class="round-button" type="button" title="Locate my nodes">⚑</button>
     <button id="bottomConnectionsButton" class="round-button" type="button" title="Connections">🔗</button>
+    <button id="bottomConnectModeButton" class="round-button" type="button" title="Connect mode: drag from your node to a neighbor to link">🤝</button>
     <button id="bottomHelpButton" class="round-button" type="button" title="How to play">?</button>
   </div>
   <div class="overlay node-info hidden" id="nodeInfo">
@@ -252,10 +259,19 @@
   <div id="leaderboardPanel" class="leaderboard-panel">
     <div class="leaderboard-panel-header">
       <span>🏆 Leaderboard</span>
-      <button id="refreshLeaderboardButton" type="button" class="secondary">Refresh</button>
+      <div class="leaderboard-header-actions">
+        <button id="refreshLeaderboardButton" type="button" class="secondary">Refresh</button>
+        <button id="toggleLeaderboardButton" type="button" class="secondary" title="Collapse leaderboard">▾</button>
+      </div>
     </div>
-    <div id="leaderboardList" class="leaderboard-list">
-      <div class="leaderboard-empty">Loading leaderboard...</div>
+    <div id="leaderboardBody">
+      <div class="leaderboard-tabs">
+        <button id="leaderboardTabArmy" type="button" class="leaderboard-tab active" title="Largest army">⚔️ Army</button>
+        <button id="leaderboardTabNodes" type="button" class="leaderboard-tab" title="Most nodes owned">🗺️ Nodes</button>
+      </div>
+      <div id="leaderboardList" class="leaderboard-list">
+        <div class="leaderboard-empty">Loading leaderboard...</div>
+      </div>
     </div>
   </div>
   <div id="toastContainer" class="toast-container"></div>
@@ -352,6 +368,10 @@
     const refreshLeaderboardButton = document.getElementById("refreshLeaderboardButton");
     const showTutorialButton = document.getElementById("showTutorialButton");
     const leaderboardListEl = document.getElementById("leaderboardList");
+    const leaderboardPanelEl = document.getElementById("leaderboardPanel");
+    const leaderboardTabArmy = document.getElementById("leaderboardTabArmy");
+    const leaderboardTabNodes = document.getElementById("leaderboardTabNodes");
+    const toggleLeaderboardButton = document.getElementById("toggleLeaderboardButton");
     const toastContainer = document.getElementById("toastContainer");
     const tutorialOverlay = document.getElementById("tutorialOverlay");
     const startLocationOverlay = document.getElementById("startLocationOverlay");
@@ -383,10 +403,12 @@
     const sendModeHint = document.getElementById("sendModeHint");
     const sendModeFixedButton = document.getElementById("sendModeFixedButton");
     const sendModeRelativeButton = document.getElementById("sendModeRelativeButton");
+    const sendModeLongButton = document.getElementById("sendModeLongButton");
     const sendModePanel = document.getElementById("sendModePanel");
     const bottomMenuButton = document.getElementById("bottomMenuButton");
     const bottomLocateButton = document.getElementById("bottomLocateButton");
     const bottomConnectionsButton = document.getElementById("bottomConnectionsButton");
+    const bottomConnectModeButton = document.getElementById("bottomConnectModeButton");
     const bottomHelpButton = document.getElementById("bottomHelpButton");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
@@ -430,6 +452,7 @@
     let sendMode = "fixed";
     updateAuthButtonsVisibility();
     let spacePressed = false;
+    let connectModeEnabled = false;
     let linkDragState = null;
     let linkDragCursor = { x: 0, y: 0 };
     let linkDragSnapTarget = null;
@@ -495,15 +518,23 @@
       return clamp(parsed, 1, 100);
     }
     function setSendMode(mode) {
-      sendMode = mode === "relative" ? "relative" : "fixed";
+      sendMode = ["fixed", "relative", "long"].includes(mode) ? mode : "fixed";
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
-      sendAmountLabel.textContent = sendMode === "fixed"
-        ? "📌 same amount every link"
-        : "📈 base per tick, +1 for each new link";
-      sendModeHint.textContent = sendMode === "fixed"
-        ? "Fixed 📌 sends this exact army amount on every link, every tick."
-        : "Relative 📈: your 1st link sends the base amount, your 2nd link sends base+1, 3rd sends base+2, and so on.";
+      sendModeLongButton.classList.toggle("active", sendMode === "long");
+      if (sendMode === "long") {
+        sendAmountLabel.textContent = "🛣️ rate set by system";
+        sendModeHint.textContent = "Long 🛣️: connect any node by road. The farther the target, the slower the army flow (set by the system).";
+        sendPerTickInput.disabled = true;
+      } else {
+        sendPerTickInput.disabled = false;
+        sendAmountLabel.textContent = sendMode === "fixed"
+          ? "📌 same amount every link"
+          : "📈 increase per link (x)";
+        sendModeHint.textContent = sendMode === "fixed"
+          ? "Fixed 📌 sends this exact army amount on every link, every tick."
+          : "Relative 📈: your 1st link sends x, your 2nd link sends 2x, 3rd sends 3x, and so on.";
+      }
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
@@ -517,7 +548,7 @@
       const base = normalizeSendPerTick(sendPerTickInput.value);
       if (sendMode === "relative") {
         const activeConnections = currentAttackFeatures.filter((feature) => String(feature?.properties?.ownerState || "") === "self").length;
-        return Math.max(0, Math.min(base + activeConnections, army));
+        return Math.max(0, Math.min(base * (activeConnections + 1), army));
       }
       return Math.min(base, army);
     }
@@ -993,14 +1024,14 @@
         || null;
       let isAdjacentTarget = connectableNodeIds.has(String(targetNodeId))
         || selectedNodeTargets.some((feature) => String(feature?.properties?.id || "") === String(targetNodeId));
-      if (!activeRoute && !isAdjacentTarget) {
+      if (!activeRoute && !isAdjacentTarget && sendMode !== "long") {
         await refreshSelectedNodeTargets();
         targetFeature = selectedNodeTargets.find((feature) => String(feature?.properties?.id || "") === String(targetNodeId))
           || targetFeature;
         isAdjacentTarget = connectableNodeIds.has(String(targetNodeId))
           || selectedNodeTargets.some((feature) => String(feature?.properties?.id || "") === String(targetNodeId));
       }
-      if (!activeRoute && !isAdjacentTarget) {
+      if (!activeRoute && !isAdjacentTarget && sendMode !== "long") {
         if (String(targetFeature?.properties?.ownerState || "") === "self") {
           selectSenderNode(targetFeature, `Selected node ${targetNodeId}.`);
           return;
@@ -1420,6 +1451,19 @@
       const isHidden = sendModePanel.classList.toggle("hidden");
       bottomConnectionsButton.classList.toggle("active", !isHidden);
     });
+    bottomConnectModeButton?.addEventListener("click", () => {
+      connectModeEnabled = !connectModeEnabled;
+      bottomConnectModeButton.classList.toggle("active", connectModeEnabled);
+      updateLinkDragPanState();
+      if (connectModeEnabled) {
+        showToast("Connect mode ON: drag from one of your nodes to a neighbor to link.", "info");
+        setStatus("Connect mode ON: drag from one of your nodes to a neighbor to link.");
+      } else {
+        cancelLinkDrag();
+        showToast("Connect mode OFF.", "info");
+        setStatus(defaultStatusMessage());
+      }
+    });
     bottomHelpButton?.addEventListener("click", () => { showTutorialButton.click(); });
     closeNodeInfoButton?.addEventListener("click", () => {
       inspectedNodeId = null;
@@ -1442,10 +1486,13 @@
       toggleMissileTarget?.addEventListener("change", (e) => setOverlayVisibility("missileTarget", e.target.checked));
     }
 
+    let leaderboardEntries = [];
+    let leaderboardSortMode = "army";
     async function fetchLeaderboard() {
       try {
         const data = await fetchJson("/api/leaderboard");
-        renderLeaderboard(data && data.leaderboard ? data.leaderboard : []);
+        leaderboardEntries = data && data.leaderboard ? data.leaderboard : [];
+        renderLeaderboard(leaderboardEntries);
       } catch (e) {
         console.warn("Leaderboard fetch failed:", e);
         leaderboardListEl.innerHTML = '<div class="leaderboard-empty">Leaderboard unavailable.</div>';
@@ -1460,7 +1507,13 @@
         return;
       }
       const ownId = currentPlayerId || (sessionToken ? null : null);
-      const rowEls = entries.map((entry, idx) => {
+      const sorted = [...entries].sort((a, b) => {
+        if (leaderboardSortMode === "nodes") {
+          return (b.nodes || 0) - (a.nodes || 0) || (b.army || 0) - (a.army || 0);
+        }
+        return (b.army || 0) - (a.army || 0) || (b.nodes || 0) - (a.nodes || 0);
+      });
+      const rowEls = sorted.map((entry, idx) => {
         const rank = idx + 1;
         const playerId = entry.playerId || entry.id || "";
         const isSelf = ownId && playerId === ownId;
@@ -1506,6 +1559,23 @@
       return String(str).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
     }
     refreshLeaderboardButton.addEventListener("click", fetchLeaderboard);
+    leaderboardTabArmy?.addEventListener("click", () => {
+      leaderboardSortMode = "army";
+      leaderboardTabArmy.classList.add("active");
+      leaderboardTabNodes.classList.remove("active");
+      renderLeaderboard(leaderboardEntries);
+    });
+    leaderboardTabNodes?.addEventListener("click", () => {
+      leaderboardSortMode = "nodes";
+      leaderboardTabNodes.classList.add("active");
+      leaderboardTabArmy.classList.remove("active");
+      renderLeaderboard(leaderboardEntries);
+    });
+    toggleLeaderboardButton?.addEventListener("click", () => {
+      const collapsed = leaderboardPanelEl.classList.toggle("collapsed");
+      toggleLeaderboardButton.textContent = collapsed ? "▸" : "▾";
+      toggleLeaderboardButton.title = collapsed ? "Expand leaderboard" : "Collapse leaderboard";
+    });
 
     let tutorialStepIndex = 0;
     function updateTutorialStep() {
@@ -2354,7 +2424,13 @@
       const fromNodeId = linkDragState.fromNodeId;
       const candidates = (hitFeatures || []).filter((feature) => {
         const targetId = String(feature?.properties?.id || "");
-        return targetId && targetId !== fromNodeId && connectableNodeIds.has(targetId);
+        if (!targetId || targetId === fromNodeId) {
+          return false;
+        }
+        if (sendMode === "long") {
+          return true;
+        }
+        return connectableNodeIds.has(targetId);
       });
       if (!candidates.length) {
         return null;
@@ -2374,7 +2450,7 @@
       if (!map) {
         return;
       }
-      const wantDisabled = spacePressed || linkDragState !== null;
+      const wantDisabled = spacePressed || linkDragState !== null || connectModeEnabled;
       const isDisabled = !map.dragPan.isEnabled();
       if (wantDisabled && !isDisabled) {
         map.dragPan.disable();
@@ -2458,7 +2534,7 @@
         setStatus(`Link from node ${fromNodeId} cancelled.`);
         return;
       }
-      if (!connectableNodeIds.has(targetNodeId)) {
+      if (sendMode !== "long" && !connectableNodeIds.has(targetNodeId)) {
         showToast("That node is not adjacent to the source node.", "info");
         setStatus(`Link from node ${fromNodeId} cancelled.`);
         return;
@@ -2997,7 +3073,7 @@
     }
 
     function handleNodeMouseDown(event) {
-      if (!spacePressed || linkDragState) {
+      if ((!spacePressed && !connectModeEnabled) || linkDragState) {
         return;
       }
       const feature = event.features?.[0];
@@ -3563,6 +3639,7 @@
     usernameInput.addEventListener("input", saveLoginFormState);
     sendModeFixedButton.addEventListener("click", () => setSendMode("fixed"));
     sendModeRelativeButton.addEventListener("click", () => setSendMode("relative"));
+    sendModeLongButton.addEventListener("click", () => setSendMode("long"));
     sendPerTickInput.addEventListener("change", () => {
       setSendPerTickValue(sendPerTickInput.value);
       updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
