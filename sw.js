@@ -1,9 +1,10 @@
-const APP_SHELL_CACHE = "new-england-four-app-v78";
-const DATA_CACHE = "new-england-four-data-v78";
+const APP_SHELL_CACHE = "new-england-four-app-v79";
+const DATA_CACHE = "new-england-four-data-v79";
 const DATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const APP_SHELL_FILES = [
   "/",
   "/openfreemap_viewer.html",
+  "/browsericon.png",
   "/vendor/maplibre-gl.js",
   "/vendor/maplibre-gl.css",
 ];
