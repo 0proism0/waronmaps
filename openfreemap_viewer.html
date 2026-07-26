@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Node Game</title>
+  <title>WARONMAPS</title>
   <link href="/vendor/maplibre-gl.css" rel="stylesheet">
   <style>
     * { box-sizing: border-box; }
@@ -139,7 +139,7 @@
 </head>
 <body>
   <div id="loadingScreen" class="loading-screen">
-    <h1>Loading War on Map</h1>
+    <h1>Loading WARONMAPS</h1>
     <p id="loadingScreenStatus">Connecting to game server...</p>
     <div class="progress-track"><div id="loadingScreenProgress" class="progress-fill indeterminate"></div></div>
   </div>
@@ -147,7 +147,7 @@
   <canvas id="connectionCanvas" class="connection-canvas"></canvas>
   <div class="overlay panel" id="panel">
     <div class="panel-header">
-      <h1 id="panelTitle">War on Map</h1>
+      <h1 id="panelTitle">WARONMAPS</h1>
       <button id="hidePanelButton" class="panel-close secondary" type="button" aria-label="Close">×</button>
     </div>
     <div class="panel-body">
@@ -249,7 +249,7 @@
   <div id="tutorialOverlay" class="tutorial-overlay">
     <div class="tutorial-card">
       <div class="tutorial-step active" data-step="0">
-        <div class="tutorial-title">Welcome to War on Map</div>
+        <div class="tutorial-title">Welcome to WARONMAPS</div>
         <div class="tutorial-text">This is a persistent multiplayer strategy game played on real road intersections. Register, log in, or Play as Guest first, then click a neutral node on the map to claim your starting territory.</div>
       </div>
       <div class="tutorial-step" data-step="1">
@@ -307,6 +307,7 @@
     const PANEL_KEY = "node-game-panel-v1";
     const LAST_BUILD_STATUS_KEY = "node-game-build-status-v1";
     const LAST_OWNED_VIEW_KEY = "node-game-owned-view-v1";
+    const OWNED_NODES_CACHE_KEY = "waronmaps-owned-nodes-v1";
     const TUTORIAL_KEY = "node-game-tutorial-v1";
     const BUILD_POLL_MS = 3000;
     const GAME_POLL_MS = 2000;
@@ -1764,6 +1765,35 @@
       }
     }
 
+    function saveOwnedNodesCache(playerId, features) {
+      try {
+        if (!playerId) {
+          return;
+        }
+        localStorage.setItem(OWNED_NODES_CACHE_KEY, JSON.stringify({
+          playerId,
+          features,
+          cachedAt: Date.now(),
+        }));
+      } catch {}
+    }
+
+    function loadOwnedNodesCache() {
+      try {
+        const raw = localStorage.getItem(OWNED_NODES_CACHE_KEY);
+        if (!raw) {
+          return null;
+        }
+        const cached = JSON.parse(raw);
+        if (!cached || !Array.isArray(cached.features)) {
+          return null;
+        }
+        return cached;
+      } catch {
+        return null;
+      }
+    }
+
     function saveOwnedView(features) {
       try {
         const coords = features
@@ -2883,10 +2913,16 @@
       map.getSource("region-overview").setData({ type: "FeatureCollection", features: generationFeatures });
       map.getSource("generation-target").setData({ type: "FeatureCollection", features: generationFeatures });
       const stateLabel = (region.states || []).join(", ");
-      document.title = `${region.name} Node Game`;
-      panelTitleEl.textContent = region.name;
+      document.title = "WARONMAPS";
+      panelTitleEl.textContent = "WARONMAPS";
       regionTextEl.textContent = stateLabel;
       loadingScreenStatusEl.textContent = `Preparing nodes for ${stateLabel}...`;
+      if (sessionToken) {
+        const cachedOwned = loadOwnedNodesCache();
+        if (cachedOwned && cachedOwned.features.length) {
+          lastOwnedFeatures = cachedOwned.features;
+        }
+      }
       if (sessionToken && focusStoredOwnedView()) {
         return;
       }
@@ -3319,6 +3355,7 @@
         currentPlayerId = state.player?.id || null;
         const ownedFeatures = state.ownedNodes?.features || [];
         lastOwnedFeatures = ownedFeatures;
+        saveOwnedNodesCache(currentPlayerId, ownedFeatures);
         setAttackFeatures(state.attacks?.features || []);
         if (state.player) {
           if (ownedFeatures.length) {

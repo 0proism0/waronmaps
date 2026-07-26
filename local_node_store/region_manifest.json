@@ -2,12 +2,12 @@
   "version": 1,
   "active_region": {
     "id": "new_england_two",
-    "name": "Maine and New Hampshire",
-    "states": ["Maine", "New Hampshire"],
+    "name": "Maine",
+    "states": ["Maine"],
     "prepared_root": "local_node_store/northern_new_england",
     "bounds": {
-      "west": -72.6,
-      "south": 42.7,
+      "west": -71.2,
+      "south": 43.0,
       "east": -66.8,
       "north": 47.6
     },
@@ -39,23 +39,6 @@
           [-71.10, 44.60],
           [-71.10, 43.00]
         ]]
-      },
-      {
-        "id": "new_hampshire",
-        "name": "New Hampshire",
-        "coordinates": [[
-          [-72.56, 42.70],
-          [-70.60, 42.70],
-          [-70.60, 43.10],
-          [-70.70, 43.55],
-          [-70.80, 44.05],
-          [-71.00, 44.45],
-          [-71.35, 44.90],
-          [-71.70, 45.15],
-          [-72.10, 45.30],
-          [-72.56, 45.30],
-          [-72.56, 42.70]
-        ]]
       }
     ],
     "query_bounds": [
@@ -86,13 +69,6 @@
         "south": 43.70,
         "east": -66.85,
         "north": 45.30
-      },
-      {
-        "id": "new_hampshire",
-        "west": -72.60,
-        "south": 42.70,
-        "east": -70.60,
-        "north": 45.35
       }
     ],
     "overview_hide_zoom": 7,

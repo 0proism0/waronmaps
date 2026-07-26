@@ -1,5 +1,5 @@
-const APP_SHELL_CACHE = "new-england-four-app-v75";
-const DATA_CACHE = "new-england-four-data-v75";
+const APP_SHELL_CACHE = "new-england-four-app-v76";
+const DATA_CACHE = "new-england-four-data-v76";
 const DATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const APP_SHELL_FILES = [
   "/",
