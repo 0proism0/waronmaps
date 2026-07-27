@@ -1186,7 +1186,7 @@
           inputEl.min = "1";
           inputEl.max = "250";
           inputEl.step = "1";
-          inputEl.value = String(configuredSendPerTick);
+          inputEl.value = String(ratePerTick);
           inputEl.dataset.fromNodeId = String(routeFeature?.properties?.fromNodeId || "");
           inputEl.dataset.toNodeId = String(routeFeature?.properties?.toNodeId || "");
           inputEl.addEventListener("focus", () => {
@@ -2430,6 +2430,17 @@
       return {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
+      };
+    }
+    function touchEventToMapPoint(event) {
+      const touch = event.touches?.[0] || event.changedTouches?.[0];
+      if (!touch || !map) {
+        return { x: touch?.clientX || 0, y: touch?.clientY || 0 };
+      }
+      const rect = map.getCanvas().getBoundingClientRect();
+      return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top,
       };
     }
 
@@ -3807,6 +3818,21 @@
       }
       finishLinkDrag(mouseEventToMapPoint(event));
     });
+    window.addEventListener("touchmove", (event) => {
+      if (!linkDragState) {
+        return;
+      }
+      if (connectModeEnabled) {
+        event.preventDefault();
+      }
+      updateLinkDragCursor(touchEventToMapPoint(event));
+    }, { passive: false });
+    window.addEventListener("touchend", (event) => {
+      if (!linkDragState) {
+        return;
+      }
+      finishLinkDrag(touchEventToMapPoint(event));
+    });
     window.addEventListener("online", () => {
       nextBuildPollDelayMs = BUILD_POLL_MS;
       nextGamePollDelayMs = GAME_POLL_MS;
@@ -3870,6 +3896,9 @@
       map.on("mousedown", "connectable-node-rings", handleNodeMouseDown);
       map.on("mousedown", "game-node-circles", handleNodeMouseDown);
       map.on("mousedown", "game-node-labels", handleNodeMouseDown);
+      map.on("touchstart", "connectable-node-rings", handleNodeMouseDown);
+      map.on("touchstart", "game-node-circles", handleNodeMouseDown);
+      map.on("touchstart", "game-node-labels", handleNodeMouseDown);
       map.on("mouseenter", "connectable-node-rings", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "connectable-node-rings", handleNodeLeave);
       map.on("mouseenter", "game-node-circles", () => { map.getCanvas().style.cursor = "pointer"; });
