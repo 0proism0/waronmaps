@@ -278,6 +278,8 @@ struct Attack {
     send_mode: String,
     #[serde(default = "default_send_percent")]
     send_percent: i64,
+    #[serde(default)]
+    fractional_carry: f64,
     created_at: i64,
 }
 
@@ -1991,7 +1993,25 @@ impl App {
                 continue;
             }
 
-            let flow = clamp_i64(attack.send_per_tick.max(1), 1, source_snapshot.army.max(1));
+            let flow = if attack.send_mode == "long" {
+                // Fractional rate for long-distance links: send_per_tick is
+                // stored in milli-units (x1000). Accumulate the fractional
+                // part across ticks so e.g. 0.5/tick sends 1 army every
+                // other tick.
+                let rate = (attack.send_per_tick.max(1) as f64) / 1000.0;
+                let carry = attack.fractional_carry + rate;
+                let whole = carry.floor() as i64;
+                let remainder = carry - whole as f64;
+                if let Some(existing_attack) = data.state.attacks.get_mut(&attack_id) {
+                    existing_attack.fractional_carry = remainder;
+                }
+                clamp_i64(whole.max(0), 0, source_snapshot.army.max(0))
+            } else {
+                clamp_i64(attack.send_per_tick.max(1), 1, source_snapshot.army.max(1))
+            };
+            if flow <= 0 {
+                continue;
+            }
 
             if let Some(source_node) = data.state.nodes.get_mut(&attack.from_node_id) {
                 source_node.army = (source_node.army - flow).max(0);
@@ -2300,7 +2320,10 @@ impl App {
         for pair in path.windows(2) {
             distance_km += haversine_km(pair[0][1], pair[0][0], pair[1][1], pair[1][0]);
         }
-        let rate = ((10.0 / (1.0 + distance_km)).ceil() as i64).clamp(1, 10);
+        // Fractional rate stored as milli-units (x1000) so it fits in i64.
+        // 1.0 army/tick = 1000; 0.5 army/tick = 500.
+        let rate_f64 = 1.0 / (1.0 + distance_km);
+        let rate = ((rate_f64 * 1000.0).round() as i64).clamp(100, 1000);
         let mode = if target.owner_id.as_deref() == Some(player_id) {
             "transfer"
         } else {
@@ -2841,6 +2864,7 @@ impl App {
             )?;
             (mode, path, rate)
         };
+        let final_send_mode = if is_adjacent { send_mode.clone() } else { "long".to_string() };
         let attack_id = random_id("attack");
         data.state.attacks.insert(
             attack_id.clone(),
@@ -2852,8 +2876,9 @@ impl App {
                 to_node_id: to_node_id.to_string(),
                 path,
                 send_per_tick: computed_rate,
-                send_mode: send_mode.clone(),
+                send_mode: final_send_mode.clone(),
                 send_percent,
+                fractional_carry: 0.0,
                 created_at: now_ms(),
             },
         );
@@ -2867,7 +2892,7 @@ impl App {
             "ok": true,
             "attackId": attack_id,
             "sendPerTick": computed_rate,
-            "sendMode": send_mode,
+            "sendMode": final_send_mode,
             "sendPercent": send_percent,
             "attack": attack_feature
         }))
@@ -2895,6 +2920,9 @@ impl App {
                     && attack.to_node_id == to_node_id
             })
             .ok_or_else(|| "Connection not found.".to_string())?;
+        if attack.send_mode == "long" {
+            return Err("Long-distance links have a fixed system rate and cannot be changed.".to_string());
+        }
         attack.send_per_tick = next_rate;
         if let Some(mode) = send_mode {
             attack.send_mode = sanitize_send_mode(Some(mode));

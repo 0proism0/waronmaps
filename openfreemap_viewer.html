@@ -459,6 +459,8 @@
     let nextGamePollDelayMs = GAME_POLL_MS;
     let lastWorldUpdateRefreshAt = 0;
     let lastWorldUpdateVersion = null;
+    let lastTileCacheClearAt = 0;
+    const TILE_CACHE_CLEAR_INTERVAL_MS = 10000;
     let missileLaunchMode = null;
     let lastMissileClickAt = 0;
     let overlayVisibility = {
@@ -1131,15 +1133,21 @@
         const routeSendMode = String(routeFeature?.properties?.sendMode || "fixed");
         const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? configuredSendPerTick;
         const overlapCount = Number(routeFeature?.properties?.overlapCount || 1);
-        modeEl.textContent = routeSendMode === "relative"
-          ? `${String(routeFeature?.properties?.mode || "attack")} · relative · ${effectiveSendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`
-          : `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
+        if (routeSendMode === "long") {
+          const ratePerTick = configuredSendPerTick / 1000;
+          modeEl.textContent = `${String(routeFeature?.properties?.mode || "attack")} · long · ${ratePerTick.toFixed(2)}/tick (fixed)`;
+        } else {
+          modeEl.textContent = routeSendMode === "relative"
+            ? `${String(routeFeature?.properties?.mode || "attack")} · relative · ${effectiveSendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`
+            : `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
+        }
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
 
         const isEditable = (
           String(routeFeature?.properties?.fromNodeId || "") === nodeId
           && String(routeFeature?.properties?.ownerState || "") === "self"
+          && String(routeFeature?.properties?.sendMode || "") !== "long"
         );
         if (isEditable) {
           const controlsEl = document.createElement("div");
@@ -3377,19 +3385,19 @@
         }
       } else if (message.type === "world-update") {
         const now = Date.now();
-        const versionChanged = message.version !== undefined
-          ? message.version !== lastWorldUpdateVersion
-          : true;
         if (message.version !== undefined) {
           lastWorldUpdateVersion = message.version;
         }
-        if (versionChanged || now - lastWorldUpdateRefreshAt >= WORLD_UPDATE_THROTTLE_MS) {
+        if (now - lastWorldUpdateRefreshAt >= WORLD_UPDATE_THROTTLE_MS) {
           lastWorldUpdateRefreshAt = now;
-          if (versionChanged) {
-            clearNodeTileResponseCache();
-          }
           void refreshGameState();
-          scheduleVisibleTileRefresh(100, versionChanged);
+          // Only refetch map tiles occasionally; the game-state summary
+          // already carries fresh army numbers for owned nodes.
+          if (now - lastTileCacheClearAt >= TILE_CACHE_CLEAR_INTERVAL_MS) {
+            lastTileCacheClearAt = now;
+            clearNodeTileResponseCache();
+            scheduleVisibleTileRefresh(100, true);
+          }
         }
       }
     }
@@ -3456,6 +3464,17 @@
         } else {
           panelAutoHiddenForSession = false;
         }
+        // Merge fresh owned-node data into the rendered features so army
+        // numbers update without refetching map tiles.
+        if (ownedFeatures.length) {
+          const ownedById = new Map(ownedFeatures.map((feature) => [String(feature.properties?.id || ""), feature]));
+          renderedNodeFeatures = renderedNodeFeatures.map((feature) => {
+            const fresh = ownedById.get(String(feature.properties?.id || ""));
+            return fresh ? { ...feature, properties: { ...feature.properties, army: fresh.properties?.army, armyLabel: fresh.properties?.armyLabel } } : feature;
+          });
+          renderedNodeFeatureMap = buildNodeFeatureMap(renderedNodeFeatures);
+          map.getSource("game-nodes")?.setData({ type: "FeatureCollection", features: renderedNodeFeatures });
+        }
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         renderSelectedNodeTargets();
@@ -3502,9 +3521,13 @@
 
     async function gamePollLoop() {
       try {
-        clearNodeTileResponseCache();
         await refreshGameState();
-        scheduleVisibleTileRefresh(100, true);
+        const now = Date.now();
+        if (now - lastTileCacheClearAt >= TILE_CACHE_CLEAR_INTERVAL_MS) {
+          lastTileCacheClearAt = now;
+          clearNodeTileResponseCache();
+          scheduleVisibleTileRefresh(100, true);
+        }
         nextGamePollDelayMs = GAME_POLL_MS;
       } catch (error) {
         nextGamePollDelayMs = error.retryable ? (error.retryAfterMs || NETWORK_RETRY_MS) : GAME_POLL_MS;
