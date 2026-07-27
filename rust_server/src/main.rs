@@ -1972,43 +1972,6 @@ impl App {
             }
         }
 
-        // Recompute relative-link chain rates: a relative link sends
-        // (total army/tick its source node receives) + 1. Long-distance
-        // links count toward incoming at their true fractional rate.
-        for _ in 0..20 {
-            // incoming[(owner_id, node_id)] = total rate the node's owner
-            // receives there through their own links.
-            let mut incoming: HashMap<(String, String), f64> = HashMap::new();
-            for attack in data.state.attacks.values() {
-                let rate = if attack.send_mode == "long" {
-                    (attack.send_per_tick.max(1) as f64) / 1000.0
-                } else {
-                    attack.send_per_tick.max(1) as f64
-                };
-                *incoming
-                    .entry((attack.owner_id.clone(), attack.to_node_id.clone()))
-                    .or_insert(0.0) += rate;
-            }
-            let mut changed = false;
-            for attack in data.state.attacks.values_mut() {
-                if attack.send_mode != "relative" {
-                    continue;
-                }
-                let base = incoming
-                    .get(&(attack.owner_id.clone(), attack.from_node_id.clone()))
-                    .copied()
-                    .unwrap_or(0.0);
-                let new_rate = clamp_i64((base.floor() as i64) + 1, 1, 250);
-                if attack.send_per_tick != new_rate {
-                    attack.send_per_tick = new_rate;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-
         let attack_ids = data.state.attacks.keys().cloned().collect::<Vec<_>>();
         for attack_id in attack_ids {
             let Some(attack) = data.state.attacks.get(&attack_id).cloned() else {
@@ -2997,9 +2960,6 @@ impl App {
             .ok_or_else(|| "Connection not found.".to_string())?;
         if attack.send_mode == "long" {
             return Err("Irregular links have a fixed system rate and cannot be changed.".to_string());
-        }
-        if attack.send_mode == "relative" {
-            return Err("Relative link rates are computed automatically and cannot be changed.".to_string());
         }
         attack.send_per_tick = next_rate;
         if let Some(mode) = send_mode {

@@ -572,13 +572,13 @@
       sendMode = mode === "relative" ? "relative" : "fixed";
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
-      sendPerTickInput.disabled = sendMode === "relative";
+      sendPerTickInput.disabled = false;
       sendAmountLabel.textContent = sendMode === "fixed"
         ? "📌 same amount every link"
-        : "📈 auto rate (receive + 1)";
+        : "📈 starts at (receive + 1)";
       sendModeHint.textContent = sendMode === "fixed"
         ? "Fixed 📌 sends this exact army amount on every link, every tick."
-        : "Relative 📈: rate = (army your node receives per tick) + 1 — chains grow 1 → 2 → 3… (automatic, cannot be edited).";
+        : "Relative 📈: a new link starts at (army your node receives per tick) + 1, and you can adjust the value afterwards.";
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
@@ -1208,7 +1208,7 @@
         if (routeSendMode === "long") {
           modeEl.textContent = `${modeLabel} · Irregular link · ${ratePerTick.toFixed(2)}/tick (fixed)${overlapLabel}`;
         } else if (routeSendMode === "relative") {
-          modeEl.textContent = `${modeLabel} · Regular link (relative) · ${effectiveSendPerTick.toLocaleString()}/tick (auto)${overlapLabel}`;
+          modeEl.textContent = `${modeLabel} · Regular link (relative) · ${effectiveSendPerTick.toLocaleString()}/tick${overlapLabel}`;
         } else {
           modeEl.textContent = `${modeLabel} · Regular link · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== ratePerTick ? ` (set ${ratePerTick.toLocaleString()})` : ""}${overlapLabel}`;
         }
@@ -1219,7 +1219,7 @@
           String(routeFeature?.properties?.fromNodeId || "") === nodeId
           && String(routeFeature?.properties?.ownerState || "") === "self"
         );
-        const isRateEditable = isOwnOutgoing && String(routeFeature?.properties?.sendMode || "") === "fixed";
+        const isRateEditable = isOwnOutgoing && String(routeFeature?.properties?.sendMode || "") !== "long";
         if (isOwnOutgoing) {
           const controlsEl = document.createElement("div");
           controlsEl.className = "route-row-controls";
@@ -1311,10 +1311,10 @@
         : null;
       if (routeFeature) {
         const routeSendMode = String(routeFeature.properties?.sendMode || "fixed");
-        updateRouteRateButton.disabled = !sessionToken || routeSendMode !== "fixed";
-        routeInfoHintEl.textContent = routeSendMode === "fixed"
-          ? `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`
-          : `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Its rate is set automatically. Click again to remove it.`;
+        updateRouteRateButton.disabled = !sessionToken || routeSendMode === "long";
+        routeInfoHintEl.textContent = routeSendMode === "long"
+          ? `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Its rate is set by the system. Click again to remove it.`
+          : `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`;
         return;
       }
       updateRouteRateButton.disabled = true;
