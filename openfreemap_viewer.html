@@ -338,11 +338,22 @@
   <div id="startLocationOverlay" class="tutorial-overlay">
     <div class="tutorial-card">
       <div class="tutorial-title">Choose your starting location</div>
-      <div id="startLocationHint" class="tutorial-text">Please choose your starting location. Click any neutral (white/gray) node on the map, then press Claim to begin.</div>
-      <button id="overlayClaimButton" type="button" class="primary hidden">Claim this node</button>
+      <div class="tutorial-text">Click any neutral (white/gray) node on the map to claim it as your starting territory. You can dismiss this and pick whenever you're ready.</div>
+      <button id="startGotItButton" type="button" class="primary">Got it</button>
+    </div>
+  </div>
+  <div id="startConfirmOverlay" class="tutorial-overlay">
+    <div class="tutorial-card">
+      <div class="tutorial-title">Confirm starting location</div>
+      <div id="startConfirmText" class="tutorial-text">Are you sure you want to start on this node?</div>
+      <div class="tutorial-actions">
+        <button id="startConfirmNo" type="button" class="secondary">Cancel</button>
+        <button id="startConfirmYes" type="button" class="primary">Yes, start here</button>
+      </div>
     </div>
   </div>
   <script src="/vendor/maplibre-gl.js"></script>
+  <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
   <script>
     const REGION_MANIFEST_URL = "/local_node_store/region_manifest.json";
     const STATE_BOUNDARIES_URL = "/local_node_store/us_state_boundaries.geojson";
@@ -366,6 +377,62 @@
     const BUILD_URL = "/api/build";
     const LAUNCH_MISSILE_URL = "/api/launch-missile";
     const SESSION_KEY = "node-game-session-v1";
+    // CrazyGames SDK integration: persist the session token + owned nodes to
+    // CrazyGames cloud save so a player's data follows them across devices.
+    const CRAZYGAMES_SAVE_KEY = "waronmaps_save";
+    let crazyGamesUser = null;
+    async function initCrazyGames() {
+      try {
+        if (typeof CrazyGames === "undefined" || !CrazyGames?.SDK) {
+          return;
+        }
+        await CrazyGames.SDK.init();
+        try {
+          crazyGamesUser = await CrazyGames.SDK.user.getUser();
+        } catch {
+          crazyGamesUser = null;
+        }
+        // Restore session from CrazyGames cloud save if we don't have one.
+        if (!sessionToken) {
+          const saved = await crazyGamesLoad();
+          if (saved?.sessionToken) {
+            sessionToken = saved.sessionToken;
+            localStorage.setItem(SESSION_KEY, sessionToken);
+          }
+        }
+      } catch (error) {
+        console.warn("CrazyGames SDK init failed:", error);
+      }
+    }
+    async function crazyGamesSave(payload) {
+      try {
+        if (typeof CrazyGames === "undefined" || !CrazyGames?.SDK?.data) {
+          return;
+        }
+        await CrazyGames.SDK.data.setItem(CRAZYGAMES_SAVE_KEY, JSON.stringify(payload));
+      } catch (error) {
+        console.warn("CrazyGames save failed:", error);
+      }
+    }
+    async function crazyGamesLoad() {
+      try {
+        if (typeof CrazyGames === "undefined" || !CrazyGames?.SDK?.data) {
+          return null;
+        }
+        const raw = await CrazyGames.SDK.data.getItem(CRAZYGAMES_SAVE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (error) {
+        console.warn("CrazyGames load failed:", error);
+        return null;
+      }
+    }
+    function saveGameExternally() {
+      void crazyGamesSave({
+        sessionToken,
+        playerId: currentPlayerId,
+        savedAt: Date.now(),
+      });
+    }
     const LOGIN_FORM_KEY = "node-game-login-form-v1";
     const PANEL_KEY = "node-game-panel-v1";
     const LAST_BUILD_STATUS_KEY = "node-game-build-status-v1";
@@ -464,8 +531,11 @@
     const startNodeHintEl = document.getElementById("startNodeHint");
     const clearStartNodeButton = document.getElementById("clearStartNodeButton");
     const claimStartNodeButton = document.getElementById("claimStartNodeButton");
-    const overlayClaimButton = document.getElementById("overlayClaimButton");
-    const startLocationHint = document.getElementById("startLocationHint");
+    const startGotItButton = document.getElementById("startGotItButton");
+    const startConfirmOverlay = document.getElementById("startConfirmOverlay");
+    const startConfirmText = document.getElementById("startConfirmText");
+    const startConfirmYes = document.getElementById("startConfirmYes");
+    const startConfirmNo = document.getElementById("startConfirmNo");
 
     let activeRegion = null;
     let buildPollTimer = null;
@@ -2351,24 +2421,18 @@
       logoutButton.classList.toggle("hidden", !loggedIn);
     }
 
+    let startOverlayDismissed = false;
     function updateStartLocationOverlay() {
-      const needsStart = Boolean(sessionToken && lastOwnedFeatures.length === 0);
+      const needsStart = Boolean(sessionToken && lastOwnedFeatures.length === 0 && !startOverlayDismissed);
       startLocationOverlay.classList.toggle("show", needsStart);
-      if (!needsStart) {
-        overlayClaimButton.classList.add("hidden");
-        return;
-      }
-      const selectedFeature = selectedStartNodeId
-        ? renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === selectedStartNodeId)
-        : null;
-      if (selectedFeature) {
-        const name = selectedFeature.properties?.displayName || "Intersection";
-        startLocationHint.textContent = `Selected: ${name}. Press Claim to start your territory here.`;
-        overlayClaimButton.classList.remove("hidden");
-      } else {
-        startLocationHint.textContent = "Please choose your starting location. Click any neutral (white/gray) node on the map, then press Claim to begin.";
-        overlayClaimButton.classList.add("hidden");
-      }
+    }
+    function showStartConfirm(feature) {
+      const name = feature?.properties?.displayName || "Intersection";
+      startConfirmText.textContent = `Are you sure you want to start on ${name}?`;
+      startConfirmOverlay.classList.add("show");
+    }
+    function hideStartConfirm() {
+      startConfirmOverlay.classList.remove("show");
     }
 
     async function claimStartNode(nodeId) {
@@ -2391,6 +2455,7 @@
           focusOwnedNodes(lastOwnedFeatures, true);
         }
         showToast(`Starting territory claimed! ${result.count || 0} nodes.`, "success");
+        saveGameExternally();
         showTutorial();
       } catch (error) {
         showToast(`Claim failed: ${error.message}`, "error");
@@ -3128,15 +3193,13 @@
         return;
       }
       if (lastOwnedFeatures.length === 0) {
-        inspectNode(feature);
         if (props.ownerState === "neutral") {
           selectedStartNodeId = nodeId;
-          showToast(`${props.displayName || "Intersection"} selected. Click Claim to start your territory.`, "info");
+          showStartConfirm(feature);
         } else {
           selectedStartNodeId = null;
+          inspectNode(feature);
         }
-        updateStartNodeAction(feature);
-        updateStartLocationOverlay();
         return;
       }
       if (selectedNodeId === nodeId) {
@@ -3740,10 +3803,12 @@
         localStorage.setItem(SESSION_KEY, sessionToken);
         saveLoginFormState();
         updateAuthButtonsVisibility();
+        startOverlayDismissed = false;
         authSummaryEl.textContent = `${actionLabel} successful. Loading your nodes...`;
         hideMainPanel(true);
         panelAutoHiddenForSession = true;
         showToast(`${actionLabel} successful. Loading your nodes...`, "success");
+        saveGameExternally();
         connectWebSocket();
         await refreshGameState();
         updateStartLocationOverlay();
@@ -3773,10 +3838,19 @@
         void claimStartNode(selectedStartNodeId);
       }
     });
-    overlayClaimButton.addEventListener("click", () => {
+    startGotItButton?.addEventListener("click", () => {
+      startOverlayDismissed = true;
+      updateStartLocationOverlay();
+    });
+    startConfirmYes?.addEventListener("click", () => {
+      hideStartConfirm();
       if (selectedStartNodeId) {
         void claimStartNode(selectedStartNodeId);
       }
+    });
+    startConfirmNo?.addEventListener("click", () => {
+      hideStartConfirm();
+      selectedStartNodeId = null;
     });
 
     async function submitGuest() {
@@ -3795,6 +3869,7 @@
         panelAutoHiddenForSession = false;
         localStorage.setItem(SESSION_KEY, sessionToken);
         updateAuthButtonsVisibility();
+        startOverlayDismissed = false;
         authSummaryEl.textContent = "Guest login successful. Loading your nodes...";
         hideMainPanel(true);
         panelAutoHiddenForSession = true;
@@ -4122,6 +4197,7 @@
 
     waitForServerReady()
       .then(() => {
+        void initCrazyGames();
         initializeMap();
       })
       .catch((error) => {
