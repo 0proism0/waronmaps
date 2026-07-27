@@ -1173,47 +1173,50 @@
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
 
-        const isEditable = (
+        const isOwnOutgoing = (
           String(routeFeature?.properties?.fromNodeId || "") === nodeId
           && String(routeFeature?.properties?.ownerState || "") === "self"
-          && String(routeFeature?.properties?.sendMode || "") === "fixed"
         );
-        if (isEditable) {
+        const isRateEditable = isOwnOutgoing && String(routeFeature?.properties?.sendMode || "") === "fixed";
+        if (isOwnOutgoing) {
           const controlsEl = document.createElement("div");
           controlsEl.className = "route-row-controls";
-          const inputEl = document.createElement("input");
-          inputEl.type = "number";
-          inputEl.min = "1";
-          inputEl.max = "250";
-          inputEl.step = "1";
-          inputEl.value = String(ratePerTick);
-          inputEl.dataset.fromNodeId = String(routeFeature?.properties?.fromNodeId || "");
-          inputEl.dataset.toNodeId = String(routeFeature?.properties?.toNodeId || "");
-          inputEl.addEventListener("focus", () => {
-            inputEl.select();
-          });
-          inputEl.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-              const sendPerTick = normalizeSendPerTick(inputEl.value);
-              void updateAttackRate(inputEl.dataset.fromNodeId || "", inputEl.dataset.toNodeId || "", sendPerTick);
-              inputEl.blur();
-            }
-          });
-          const buttonEl = document.createElement("button");
-          buttonEl.type = "button";
-          buttonEl.className = "secondary";
-          buttonEl.textContent = "Update";
-          buttonEl.dataset.action = "update";
-          buttonEl.dataset.fromNodeId = inputEl.dataset.fromNodeId;
-          buttonEl.dataset.toNodeId = inputEl.dataset.toNodeId;
+          if (isRateEditable) {
+            const inputEl = document.createElement("input");
+            inputEl.type = "number";
+            inputEl.min = "1";
+            inputEl.max = "250";
+            inputEl.step = "1";
+            inputEl.value = String(ratePerTick);
+            inputEl.dataset.fromNodeId = String(routeFeature?.properties?.fromNodeId || "");
+            inputEl.dataset.toNodeId = String(routeFeature?.properties?.toNodeId || "");
+            inputEl.addEventListener("focus", () => {
+              inputEl.select();
+            });
+            inputEl.addEventListener("keydown", (event) => {
+              if (event.key === "Enter") {
+                const sendPerTick = normalizeSendPerTick(inputEl.value);
+                void updateAttackRate(inputEl.dataset.fromNodeId || "", inputEl.dataset.toNodeId || "", sendPerTick);
+                inputEl.blur();
+              }
+            });
+            const buttonEl = document.createElement("button");
+            buttonEl.type = "button";
+            buttonEl.className = "secondary";
+            buttonEl.textContent = "Update";
+            buttonEl.dataset.action = "update";
+            buttonEl.dataset.fromNodeId = inputEl.dataset.fromNodeId;
+            buttonEl.dataset.toNodeId = inputEl.dataset.toNodeId;
+            controlsEl.append(inputEl, buttonEl);
+          }
           const deleteButtonEl = document.createElement("button");
           deleteButtonEl.type = "button";
           deleteButtonEl.className = "secondary";
           deleteButtonEl.textContent = "Delete";
           deleteButtonEl.dataset.action = "delete";
-          deleteButtonEl.dataset.fromNodeId = inputEl.dataset.fromNodeId;
-          deleteButtonEl.dataset.toNodeId = inputEl.dataset.toNodeId;
-          controlsEl.append(inputEl, buttonEl, deleteButtonEl);
+          deleteButtonEl.dataset.fromNodeId = String(routeFeature?.properties?.fromNodeId || "");
+          deleteButtonEl.dataset.toNodeId = String(routeFeature?.properties?.toNodeId || "");
+          controlsEl.append(deleteButtonEl);
           routeEl.append(controlsEl);
         }
         const counterpartNodeId = String(routeFeature?.properties?.fromNodeId || "") === nodeId

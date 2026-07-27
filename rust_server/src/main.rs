@@ -2349,14 +2349,23 @@ impl App {
         if source.owner_id.as_deref() != Some(player_id) {
             return Err("You can only connect from your own node.".to_string());
         }
-        let path = self.simplify_connection_path(&self.find_road_path_locked(data, from_node_id, to_node_id)?);
-        if path.len() < 2 {
-            return Err("No road path found between those nodes.".to_string());
-        }
-        let mut distance_km = 0.0;
-        for pair in path.windows(2) {
-            distance_km += haversine_km(pair[0][1], pair[0][0], pair[1][1], pair[1][0]);
-        }
+        // Irregular links are a direct straight line from source to target
+        // (no relay through intermediate nodes). The rate is a fixed
+        // fractional value based on the straight-line distance.
+        let from_coord = data
+            .node_repo
+            .coords_by_id
+            .get(from_node_id)
+            .copied()
+            .ok_or_else(|| "Invalid nodes.".to_string())?;
+        let to_coord = data
+            .node_repo
+            .coords_by_id
+            .get(to_node_id)
+            .copied()
+            .ok_or_else(|| "Invalid nodes.".to_string())?;
+        let path = vec![[from_coord.lon, from_coord.lat], [to_coord.lon, to_coord.lat]];
+        let distance_km = haversine_km(from_coord.lat, from_coord.lon, to_coord.lat, to_coord.lon);
         // Fractional rate stored as milli-units (x1000) so it fits in i64.
         // 1.0 army/tick = 1000; 0.5 army/tick = 500.
         let rate_f64 = 1.0 / (1.0 + distance_km);
