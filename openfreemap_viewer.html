@@ -157,7 +157,9 @@
     .chat-input-row { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
     .chat-input-row input { flex: 1; margin: 0; padding: 8px 10px; font-size: 13px; }
     .chat-input-row button { padding: 8px 14px; font-size: 13px; }
-    .round-button { width: 48px; height: 48px; padding: 0; border-radius: 999px; border: 0; font-size: 20px; line-height: 1; background: rgba(15, 23, 42, 0.85); color: #f8fafc; box-shadow: 0 8px 18px rgba(2, 6, 23, 0.45); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .round-button { position: relative; width: 48px; height: 48px; padding: 0; border-radius: 999px; border: 0; font-size: 20px; line-height: 1; background: rgba(15, 23, 42, 0.85); color: #f8fafc; box-shadow: 0 8px 18px rgba(2, 6, 23, 0.45); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .chat-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.4); pointer-events: none; }
+    .chat-badge.hidden { display: none; }
     .round-button:hover { background: rgba(30, 41, 59, 0.95); }
     .round-button.active { background: linear-gradient(90deg, #2563eb, #4f46e5); box-shadow: 0 8px 18px rgba(37, 99, 235, 0.35); }
     #connectionTargetsSection { display: none !important; }
@@ -228,7 +230,7 @@
     <button id="bottomLocateButton" class="round-button" type="button" title="Locate my nodes">⚑</button>
     <button id="bottomConnectionsButton" class="round-button" type="button" title="Connections">🔗</button>
     <button id="bottomConnectModeButton" class="round-button" type="button" title="Connect mode: drag from your node to a neighbor to link">🤝</button>
-    <button id="bottomChatButton" class="round-button" type="button" title="Chat">💬</button>
+    <button id="bottomChatButton" class="round-button" type="button" title="Chat">💬<span id="chatBadge" class="chat-badge hidden">0</span></button>
     <button id="bottomHelpButton" class="round-button" type="button" title="How to play">?</button>
   </div>
   <div id="chatPanel" class="overlay chat-panel hidden">
@@ -440,6 +442,7 @@
     const bottomHelpButton = document.getElementById("bottomHelpButton");
     const chatPanel = document.getElementById("chatPanel");
     const closeChatButton = document.getElementById("closeChatButton");
+    const chatBadge = document.getElementById("chatBadge");
     const chatMessagesEl = document.getElementById("chatMessages");
     const chatInput = document.getElementById("chatInput");
     const chatSendButton = document.getElementById("chatSendButton");
@@ -3523,10 +3526,23 @@
       chatMessages = messages.slice(-50);
       renderChatMessages();
     }
+    let chatUnreadCount = 0;
+    function updateChatBadge() {
+      if (chatUnreadCount > 0) {
+        chatBadge.textContent = chatUnreadCount > 99 ? "99+" : String(chatUnreadCount);
+        chatBadge.classList.remove("hidden");
+      } else {
+        chatBadge.classList.add("hidden");
+      }
+    }
     function appendChatMessage(message) {
       chatMessages.push(message);
       if (chatMessages.length > 50) {
         chatMessages = chatMessages.slice(-50);
+      }
+      if (chatPanel.classList.contains("hidden") && String(message?.playerId || "") !== String(currentPlayerId || "")) {
+        chatUnreadCount += 1;
+        updateChatBadge();
       }
       renderChatMessages();
     }
@@ -3553,6 +3569,8 @@
       const isHidden = chatPanel.classList.toggle("hidden");
       bottomChatButton.classList.toggle("active", !isHidden);
       if (!isHidden) {
+        chatUnreadCount = 0;
+        updateChatBadge();
         renderChatMessages();
         chatInput.focus();
       }
