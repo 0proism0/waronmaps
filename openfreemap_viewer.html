@@ -347,7 +347,11 @@
     const NODE_NEIGHBORS_URL = "/api/node-neighbors";
     const CONNECTION_RATE_URL = "/api/connection-rate";
     const CONNECTION_REMOVE_URL = "/api/connection-remove";
-    const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8003/ws`;
+    // On HTTPS, go through Nginx which terminates TLS and proxies /ws to the
+    // plain WebSocket server on port 8003. On HTTP (local dev), connect directly.
+    const WS_URL = window.location.protocol === "https:"
+      ? `wss://${window.location.host}/ws`
+      : `ws://${window.location.hostname}:8003/ws`;
     const REGISTER_URL = "/api/register";
     const LOGIN_URL = "/api/login";
     const GUEST_URL = "/api/guest";
