@@ -24,10 +24,9 @@ use std::process::Command;
 
 const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
 // Road classes pulled into the playable graph. Tighten or widen this to trade off
-// intersection density against download size. `residential` is intentionally left
-// out: in rural Maine/New Hampshire it explodes the node count without adding much
-// strategic value.
-const HIGHWAY_FILTER: &str = "motorway|trunk|primary|secondary|tertiary|unclassified|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link";
+// intersection density against download size. Now includes residential/service/
+// living_street so small streets get intersection nodes too (not just big roads).
+const HIGHWAY_FILTER: &str = "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link";
 const OVERPASS_TIMEOUT_SECS: u64 = 180;
 
 fn main() {
