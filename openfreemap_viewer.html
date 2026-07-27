@@ -517,16 +517,26 @@
       }
       return clamp(parsed, 1, 100);
     }
+    // True per-tick rate for a link. Irregular (long) links store the rate
+    // in milli-units (x1000); everything else is an absolute rate.
+    function routeRatePerTick(props) {
+      const raw = Number(props?.sendPerTick || 0);
+      if (String(props?.sendMode || "") === "long") {
+        return raw / 1000;
+      }
+      return raw;
+    }
     function setSendMode(mode) {
       sendMode = mode === "relative" ? "relative" : "fixed";
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
+      sendPerTickInput.disabled = sendMode === "relative";
       sendAmountLabel.textContent = sendMode === "fixed"
         ? "📌 same amount every link"
-        : "📈 increase per link (x)";
+        : "📈 auto rate (receive + 1)";
       sendModeHint.textContent = sendMode === "fixed"
         ? "Fixed 📌 sends this exact army amount on every link, every tick."
-        : "Relative 📈: your 1st link sends x, your 2nd link sends 2x, 3rd sends 3x, and so on.";
+        : "Relative 📈: rate = (army your node receives per tick) + 1 — chains grow 1 → 2 → 3… (automatic, cannot be edited).";
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
@@ -535,12 +545,30 @@
     function currentSendAmount() {
       return normalizeSendPerTick(sendPerTickInput.value);
     }
+    function incomingRateToNode(nodeId) {
+      const id = String(nodeId || "");
+      if (!id) {
+        return 0;
+      }
+      let total = 0;
+      for (const feature of currentAttackFeatures) {
+        if (String(feature?.properties?.toNodeId || "") !== id) {
+          continue;
+        }
+        if (String(feature?.properties?.ownerState || "") !== "self") {
+          continue;
+        }
+        total += routeRatePerTick(feature?.properties || {});
+      }
+      return total;
+    }
     function configuredSendRateForSource(sourceArmy) {
       const army = Math.max(0, Math.floor(Number(sourceArmy) || 0));
       const base = normalizeSendPerTick(sendPerTickInput.value);
       if (sendMode === "relative") {
-        const activeConnections = currentAttackFeatures.filter((feature) => String(feature?.properties?.ownerState || "") === "self").length;
-        return Math.max(0, Math.min(base * (activeConnections + 1), army));
+        const fromNodeId = String(linkDragState?.fromNodeId || "");
+        const incoming = incomingRateToNode(fromNodeId);
+        return Math.max(0, Math.min(Math.floor(incoming) + 1, army));
       }
       return Math.min(base, army);
     }
@@ -714,7 +742,7 @@
       let incomingAttack = 0;
       const effectiveFlowByAttackKey = computeEffectiveFlowByAttackKey();
       for (const attackFeature of attacksForNode(nodeId)) {
-        const configuredSendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const configuredSendPerTick = routeRatePerTick(attackFeature?.properties || {});
         const sendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(attackFeature)) ?? configuredSendPerTick;
         if (String(attackFeature?.properties?.fromNodeId || "") === nodeId) {
           outgoing += sendPerTick;
@@ -806,7 +834,7 @@
         const key = attackFeatureKey(attackFeature);
         const fromNodeId = String(attackFeature?.properties?.fromNodeId || "");
         const toNodeId = String(attackFeature?.properties?.toNodeId || "");
-        const configuredSendPerTick = normalizeSendPerTick(attackFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
+        const configuredSendPerTick = routeRatePerTick(attackFeature?.properties || {});
         const sourceState = nodeState.get(fromNodeId);
         if (!sourceState || sourceState.army <= 0) {
           effectiveFlowByAttackKey.set(key, 0);
@@ -1129,17 +1157,18 @@
         titleEl.textContent = routeSummaryLabel(routeFeature, nodeId);
         const modeEl = document.createElement("div");
         modeEl.className = "route-row-mode";
-        const configuredSendPerTick = normalizeSendPerTick(routeFeature?.properties?.sendPerTick || DEFAULT_SEND_PER_TICK);
         const routeSendMode = String(routeFeature?.properties?.sendMode || "fixed");
-        const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? configuredSendPerTick;
+        const ratePerTick = routeRatePerTick(routeFeature?.properties || {});
+        const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? ratePerTick;
         const overlapCount = Number(routeFeature?.properties?.overlapCount || 1);
+        const overlapLabel = overlapCount > 1 ? ` · x${overlapCount}` : "";
+        const modeLabel = String(routeFeature?.properties?.mode || "attack");
         if (routeSendMode === "long") {
-          const ratePerTick = configuredSendPerTick / 1000;
-          modeEl.textContent = `${String(routeFeature?.properties?.mode || "attack")} · long · ${ratePerTick.toFixed(2)}/tick (fixed)`;
+          modeEl.textContent = `${modeLabel} · Irregular link · ${ratePerTick.toFixed(2)}/tick (fixed)${overlapLabel}`;
+        } else if (routeSendMode === "relative") {
+          modeEl.textContent = `${modeLabel} · Regular link (relative) · ${effectiveSendPerTick.toLocaleString()}/tick (auto)${overlapLabel}`;
         } else {
-          modeEl.textContent = routeSendMode === "relative"
-            ? `${String(routeFeature?.properties?.mode || "attack")} · relative · ${effectiveSendPerTick.toLocaleString()}/tick${overlapCount > 1 ? ` · x${overlapCount}` : ""}`
-            : `${String(routeFeature?.properties?.mode || "attack")} · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== configuredSendPerTick ? ` (set ${configuredSendPerTick.toLocaleString()})` : ""}${overlapCount > 1 ? ` · x${overlapCount}` : ""}`;
+          modeEl.textContent = `${modeLabel} · Regular link · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== ratePerTick ? ` (set ${ratePerTick.toLocaleString()})` : ""}${overlapLabel}`;
         }
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
@@ -1147,7 +1176,7 @@
         const isEditable = (
           String(routeFeature?.properties?.fromNodeId || "") === nodeId
           && String(routeFeature?.properties?.ownerState || "") === "self"
-          && String(routeFeature?.properties?.sendMode || "") !== "long"
+          && String(routeFeature?.properties?.sendMode || "") === "fixed"
         );
         if (isEditable) {
           const controlsEl = document.createElement("div");
@@ -1236,8 +1265,11 @@
         ? findAttackFeature(selectedNodeId, inspectedId)
         : null;
       if (routeFeature) {
-        updateRouteRateButton.disabled = !sessionToken;
-        routeInfoHintEl.textContent = `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`;
+        const routeSendMode = String(routeFeature.properties?.sendMode || "fixed");
+        updateRouteRateButton.disabled = !sessionToken || routeSendMode !== "fixed";
+        routeInfoHintEl.textContent = routeSendMode === "fixed"
+          ? `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Update it here or click again to remove it.`
+          : `Route ${nodeDisplayNameById(selectedNodeId)} -> ${nodeDisplayNameById(inspectedId)} is active. Its rate is set automatically. Click again to remove it.`;
         return;
       }
       updateRouteRateButton.disabled = true;
@@ -1518,7 +1550,14 @@
         rowEl.className = `leaderboard-row${isSelf ? " self" : ""}`;
         rowEl.title = `Click to fly to ${username}'s territory`;
         rowEl.addEventListener("click", () => {
-          const center = Array.isArray(entry.center) ? entry.center : null;
+          let center = Array.isArray(entry.center) ? entry.center : null;
+          if ((!center || center.length < 2) && username) {
+            const ownedFeature = renderedNodeFeatures.find((feature) => String(feature?.properties?.ownerUsername || "") === username);
+            const coords = ownedFeature ? actualNodeCoordinates(ownedFeature) : null;
+            if (coords) {
+              center = coords;
+            }
+          }
           if (center && center.length >= 2) {
             map.flyTo({ center: [center[0], center[1]], zoom: 12, essential: true });
             showToast(`Flying to ${username}'s territory.`, "info");

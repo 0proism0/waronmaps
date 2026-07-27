@@ -1953,6 +1953,43 @@ impl App {
             }
         }
 
+        // Recompute relative-link chain rates: a relative link sends
+        // (total army/tick its source node receives) + 1. Long-distance
+        // links count toward incoming at their true fractional rate.
+        for _ in 0..20 {
+            // incoming[(owner_id, node_id)] = total rate the node's owner
+            // receives there through their own links.
+            let mut incoming: HashMap<(String, String), f64> = HashMap::new();
+            for attack in data.state.attacks.values() {
+                let rate = if attack.send_mode == "long" {
+                    (attack.send_per_tick.max(1) as f64) / 1000.0
+                } else {
+                    attack.send_per_tick.max(1) as f64
+                };
+                *incoming
+                    .entry((attack.owner_id.clone(), attack.to_node_id.clone()))
+                    .or_insert(0.0) += rate;
+            }
+            let mut changed = false;
+            for attack in data.state.attacks.values_mut() {
+                if attack.send_mode != "relative" {
+                    continue;
+                }
+                let base = incoming
+                    .get(&(attack.owner_id.clone(), attack.from_node_id.clone()))
+                    .copied()
+                    .unwrap_or(0.0);
+                let new_rate = clamp_i64((base.floor() as i64) + 1, 1, 250);
+                if attack.send_per_tick != new_rate {
+                    attack.send_per_tick = new_rate;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
         let attack_ids = data.state.attacks.keys().cloned().collect::<Vec<_>>();
         for attack_id in attack_ids {
             let Some(attack) = data.state.attacks.get(&attack_id).cloned() else {
@@ -2518,26 +2555,27 @@ impl App {
         let session = token
             .map(|token| self.require_session_locked(&data, token))
             .transpose()?;
-        let mut scores = HashMap::<String, (usize, i64, f64, f64)>::new();
+        let mut scores = HashMap::<String, (usize, i64, f64, f64, usize)>::new();
         for (node_id, node) in data.state.nodes.iter() {
             if let Some(owner_id) = node.owner_id.as_ref() {
-                let entry = scores.entry(owner_id.clone()).or_insert((0, 0, 0.0, 0.0));
+                let entry = scores.entry(owner_id.clone()).or_insert((0, 0, 0.0, 0.0, 0));
                 entry.0 += 1;
                 entry.1 += node.army.max(0);
                 if let Some(coord) = data.node_repo.coords_by_id.get(node_id) {
                     entry.2 += coord.lat;
                     entry.3 += coord.lon;
+                    entry.4 += 1;
                 }
             }
         }
         let mut leaderboard = Vec::new();
-        for (player_id, (nodes, army, lat_sum, lon_sum)) in scores {
+        for (player_id, (nodes, army, lat_sum, lon_sum, coord_count)) in scores {
             if let Some(player) = data.state.players.get(&player_id) {
                 if Self::is_test_or_bot_username(&player.username) || player.is_guest {
                     continue;
                 }
-                let center = if nodes > 0 {
-                    Some(json!([lon_sum / nodes as f64, lat_sum / nodes as f64]))
+                let center = if coord_count > 0 {
+                    Some(json!([lon_sum / coord_count as f64, lat_sum / coord_count as f64]))
                 } else {
                     None
                 };
@@ -2844,13 +2882,22 @@ impl App {
                 self.resolve_connection_locked(&mut data, &session.player_id, from_node_id, to_node_id)?;
             let base_rate = sanitize_send_per_tick(send_per_tick);
             let computed_rate = if send_mode == "relative" {
-                let active_connections = data
+                // Relative links send (total army/tick the source node
+                // receives) + 1; the world tick keeps this updated.
+                let incoming: f64 = data
                     .state
                     .attacks
                     .values()
-                    .filter(|attack| attack.owner_id == session.player_id)
-                    .count() as i64;
-                clamp_i64(base_rate * (active_connections + 1), 1, 250)
+                    .filter(|attack| attack.owner_id == session.player_id && attack.to_node_id == from_node_id)
+                    .map(|attack| {
+                        if attack.send_mode == "long" {
+                            (attack.send_per_tick.max(1) as f64) / 1000.0
+                        } else {
+                            attack.send_per_tick.max(1) as f64
+                        }
+                    })
+                    .sum();
+                clamp_i64((incoming.floor() as i64) + 1, 1, 250)
             } else {
                 base_rate
             };
@@ -2921,7 +2968,10 @@ impl App {
             })
             .ok_or_else(|| "Connection not found.".to_string())?;
         if attack.send_mode == "long" {
-            return Err("Long-distance links have a fixed system rate and cannot be changed.".to_string());
+            return Err("Irregular links have a fixed system rate and cannot be changed.".to_string());
+        }
+        if attack.send_mode == "relative" {
+            return Err("Relative link rates are computed automatically and cannot be changed.".to_string());
         }
         attack.send_per_tick = next_rate;
         if let Some(mode) = send_mode {
