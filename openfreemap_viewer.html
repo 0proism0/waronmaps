@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WARONMAPS</title>
+  <title>Fight and Conquer</title>
+  <meta name="description" content="Fight and Conquer — a real-time multiplayer strategy war game fought on the actual road map. Claim intersections, raise armies, chain your supply lines across real roads, and take territory from players around the world.">
+  <meta property="og:title" content="Fight and Conquer">
+  <meta property="og:description" content="A real-time multiplayer strategy war game fought on the actual road map. Claim intersections, raise armies, and conquer real roads against players worldwide.">
+  <meta property="og:type" content="website">
   <link rel="icon" type="image/png" href="/browsericon.png">
   <link href="/vendor/maplibre-gl.css" rel="stylesheet">
   <style>
@@ -3076,7 +3080,7 @@
       map.getSource("region-overview").setData({ type: "FeatureCollection", features: generationFeatures });
       map.getSource("generation-target").setData({ type: "FeatureCollection", features: generationFeatures });
       const stateLabel = (region.states || []).join(", ");
-      document.title = "WARONMAPS";
+      document.title = "Fight and Conquer";
       panelTitleEl.textContent = "WARONMAPS";
       regionTextEl.textContent = stateLabel;
       loadingScreenStatusEl.textContent = `Preparing nodes for ${stateLabel}...`;

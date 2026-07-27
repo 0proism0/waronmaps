@@ -1,106 +1,51 @@
-# waronmap
+# Fight and Conquer
 
-Persistent multiplayer road-based node strategy game built with Rust and MapLibre.
+A real-time multiplayer strategy game played on the actual road map. Players claim
+road intersections, raise armies on them, link them together, and fight over
+territory that never resets. The whole backend is a single Rust server; the map is
+rendered in the browser with MapLibre.
 
-## What Runs
+## How it plays
 
-- Runtime server: Rust in `rust_server/`
-- Viewer: `openfreemap_viewer.html`
-- OSM fetcher: Rust binary in `rust_server/src/bin/fetch_region_osm.rs`
-- S2/Hilbert node generator: Rust binary in `rust_server/src/bin/generate_nodes.rs`
-- Cache/prepare step: Rust binary in `rust_server/src/bin/prepare_region_cache.rs`
+You register (or play as a guest), pick a neutral intersection as your starting
+point, and get a small cluster of nodes to call your own. Nodes slowly build army.
+Drag from one of your nodes to another to open a link that moves troops every tick —
+reinforce your own nodes or attack someone else's. Adjacent links move at whatever
+rate you set; long "irregular" links that skip across the map crawl along at a
+fraction of that. There's a chat, a leaderboard, and a phone-friendly connect mode
+so you don't need a keyboard.
 
-The project runtime is Rust-only.
+## What's in here
 
-## Rendering And UI
+- `openfreemap_viewer.html` — the entire frontend (map, panels, canvas overlays).
+- `rust_server/src/main.rs` — the game server: auth, world state, combat ticks,
+  WebSocket broadcasts, chat, and the JSON API.
+- `rust_server/src/bin/` — small tools that pull OSM road data from Overpass and
+  turn it into the playable node set (`fetch_region_osm`, `generate_nodes`,
+  `prepare_region_cache`).
+- `local_node_store/` — prepared region data (gitignored, regenerated on demand).
+- `vendor/`, `sw.js` — frontend deps and cache versioning.
 
-- HTML is only used for 2D overlay UI:
-  - login / top status panel
-  - node info panel
-  - small control buttons
-- Nodes are rendered with MapLibre GL, which uses WebGL.
-- Connection roads and transport arrows are rendered on a canvas overlay, not as HTML elements.
-- The goal is to keep gameplay rendering out of the DOM.
+## Running it
 
-## Networking
-
-- Backend is written in Rust in `rust_server/`.
-- Data exchange uses JSON.
-- HTTP JSON endpoints remain available for auth, bootstrap, and request-style actions.
-- Live world updates are pushed over a WebSocket on `ws://localhost:8003/ws` so connected clients see changes immediately instead of polling.
-
-## Current Gameplay Flow
-
-1. Register or log in.
-2. Click one of your own green nodes to inspect it and see its adjacent targets.
-3. Hold **Space** to enter link mode.
-4. Click and drag from the selected node; a dotted line will follow your cursor.
-5. Release the mouse on a different, adjacent node to create the link.
-6. Adjust `army per tick` from the bottom-right panel.
-
-## Project Structure
-
-- `openfreemap_viewer.html`: main frontend shell, overlays, canvas connection rendering
-- `rust_server/src/main.rs`: Rust backend, auth, world state, S2 spatial index, WebSocket broadcaster, JSON APIs
-- `rust_server/src/bin/fetch_region_osm.rs`: Rust fetcher that pulls OSM road data from Overpass and derives `intersections.csv`
-- `rust_server/src/bin/generate_nodes.rs`: Rust generator that sorts intersections by S2 Hilbert curve
-- `rust_server/src/bin/prepare_region_cache.rs`: Rust cache/prepare step for prepared region data
-- `local_node_store/`: local region data and state boundaries
-- `vendor/`: local frontend dependencies
-- `sw.js`: service worker cache versioning
-
-## Dependencies
-
-Rust deps are installed automatically by Cargo when you build or run:
+Build and start the server from the repo root:
 
 ```bash
-cargo build --manifest-path rust_server/Cargo.toml
+cargo build --release --manifest-path rust_server/Cargo.toml
+./rust_server/target/release/node_game_server
 ```
 
-- No Python dependency is required for runtime.
+Then open `http://localhost:8002/openfreemap_viewer.html`. The HTTP API is on port
+8002, the WebSocket stream on 8003.
 
-## Development
+If the prepared node data is missing, the first run fetches OSM roads from Overpass
+(one-time, a few minutes) and builds the S2/Hilbert-sorted node index. To force a
+rebuild, delete `_overpass_cache/` and `intersections.csv` inside the prepared
+region folder, then run the fetch and generate tools again.
 
-Run the app with:
-
-```bash
-./resume_node_map.sh
-```
-
-This now does 4 Rust-only steps:
-
-- fetch OSM road data from Overpass if the prepared node dataset is missing (one-time, several minutes)
-- generate S2/Hilbert-sorted node data
-- refresh cached region status files
-- start the Rust game server
-
-The prepared node dataset (`local_node_store/northern_new_england/`) is gitignored,
-so a fresh checkout will trigger the one-time Overpass fetch on first run. It needs
-network access and the `curl` command. To re-fetch from scratch, delete that
-directory's `_overpass_cache/` and `intersections.csv`.
-
-The HTTP server listens on port `8002` and the WebSocket server listens on port `8003`. Set `WS_PORT` to change the WebSocket port.
-
-Open:
-
-```text
-http://localhost:8002/openfreemap_viewer.html
-```
-
-## .gitignore
-
-Current root `.gitignore` entries:
-
-```gitignore
-.DS_Store
-*.pyc
-__pycache__/
-.runtime/
-local_node_store/northern_new_england/
-rust_server/target/
-state_pbf/
-game_data/state.json
-```
+Game state lives in `game_data/state.json` by default. Point `DATABASE_URL` at a
+Postgres database (e.g. Neon) and it'll persist there instead, keeping the local
+file as a backup.
 
 ## License
 
