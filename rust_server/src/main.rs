@@ -26,6 +26,9 @@ const MAX_CATCH_UP_TICKS: usize = 60; // Avoid freezing after the server has bee
 const MAX_HTTP_WORKERS: usize = 64; // Cap in-flight request handler threads.
 const REPO_REFRESH_MS: i64 = 10_000;
 const ARMY_CAP: i64 = 1_000_000;
+const MAX_CHAT_MESSAGES: usize = 50;
+const CHAT_MAX_LEN: usize = 200;
+const CHAT_MIN_INTERVAL_MS: i64 = 2000;
 const CITY_RADIUS_KM: f64 = 2.0;
 const BARRACKS_COST: i64 = 100_000;
 const CITY_COST: i64 = 100_000_000;
@@ -326,6 +329,17 @@ impl GameState {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ChatMessage {
+    id: String,
+    player_id: String,
+    username: String,
+    color: String,
+    text: String,
+    timestamp: i64,
+}
+
 struct AppData {
     state: GameState,
     node_repo: NodeRepo,
@@ -343,6 +357,9 @@ struct AppData {
     player_nodes_dirty: bool,
     // Background-tick counter driving the periodic session purge.
     ticks_since_session_purge: u64,
+    // In-memory chat: last N messages + per-player rate limiting.
+    chat_messages: std::collections::VecDeque<ChatMessage>,
+    chat_last_sent: HashMap<String, i64>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -461,6 +478,8 @@ impl App {
                 player_nodes: HashMap::new(),
                 player_nodes_dirty: true,
                 ticks_since_session_purge: 0,
+                chat_messages: std::collections::VecDeque::new(),
+                chat_last_sent: HashMap::new(),
             }),
             ws_update_sender,
         })
@@ -3000,6 +3019,43 @@ impl App {
         }))
     }
 
+    fn chat_history_json(&self) -> String {
+        let data = app_lock(&self.inner);
+        let messages: Vec<&ChatMessage> = data.chat_messages.iter().collect();
+        json!({ "type": "chatHistory", "messages": messages }).to_string()
+    }
+
+    fn handle_chat_message(&self, player_id: &str, text: &str) {
+        let text = text.trim();
+        if text.is_empty() || text.chars().count() > CHAT_MAX_LEN {
+            return;
+        }
+        let now = now_ms();
+        let mut data = app_lock(&self.inner);
+        let last = data.chat_last_sent.get(player_id).copied().unwrap_or(0);
+        if now - last < CHAT_MIN_INTERVAL_MS {
+            return;
+        }
+        let Some(player) = data.state.players.get(player_id).cloned() else {
+            return;
+        };
+        data.chat_last_sent.insert(player_id.to_string(), now);
+        let message = ChatMessage {
+            id: random_id("chat"),
+            player_id: player_id.to_string(),
+            username: player.username.clone(),
+            color: player.color.clone(),
+            text: text.to_string(),
+            timestamp: now,
+        };
+        data.chat_messages.push_back(message.clone());
+        while data.chat_messages.len() > MAX_CHAT_MESSAGES {
+            data.chat_messages.pop_front();
+        }
+        let payload = json!({ "type": "chat", "message": message }).to_string();
+        let _ = self.ws_update_sender.try_send(payload);
+    }
+
     fn background_tick(&self) -> Result<(), String> {
         let mut data = app_lock(&self.inner);
         self.tick_world_locked(&mut data)?;
@@ -3544,7 +3600,7 @@ async fn handle_ws_client(
     })
     .await;
 
-    let _player_id = match auth_result {
+    let player_id = match auth_result {
         Ok(Some(pid)) => {
             // eprintln!("DEBUG ws auth ok player={pid}");
             let response = json!({
@@ -3554,6 +3610,9 @@ async fn handle_ws_client(
             })
             .to_string();
             let _ = ws_tx.send(tokio_tungstenite::tungstenite::Message::Text(response)).await;
+            // Send recent chat history to the newly connected client.
+            let history = app.chat_history_json();
+            let _ = ws_tx.send(tokio_tungstenite::tungstenite::Message::Text(history)).await;
             pid
         }
         Ok(None) => {
@@ -3594,6 +3653,21 @@ async fn handle_ws_client(
                     .is_err()
                 {
                     break;
+                }
+            }
+            result = ws_rx.next() => {
+                let msg = match result {
+                    Some(Ok(msg)) => msg,
+                    _ => break,
+                };
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                    if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                        if value.get("type").and_then(Value::as_str) == Some("chat") {
+                            if let Some(chat_text) = value.get("text").and_then(Value::as_str) {
+                                app.handle_chat_message(&player_id, chat_text);
+                            }
+                        }
+                    }
                 }
             }
             _ = ping_interval.tick() => {

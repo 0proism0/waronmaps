@@ -144,6 +144,19 @@
     .send-mode-panel input { margin: 0; }
     .send-mode-panel .mode-toggle { margin-bottom: 6px; }
     .bottom-bar { position: absolute; left: 16px; bottom: 16px; z-index: 6; display: flex; gap: 10px; }
+    .chat-panel { position: absolute; left: 16px; bottom: 76px; width: min(320px, calc(100vw - 32px)); max-height: min(420px, calc(100vh - 160px)); display: flex; flex-direction: column; z-index: 7; padding: 0; }
+    .chat-panel.hidden { display: none; }
+    .chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px; font-size: 14px; font-weight: 800; color: #e2e8f0; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
+    .chat-header button { padding: 2px 8px; font-size: 14px; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-height: 120px; }
+    .chat-msg { font-size: 13px; line-height: 1.4; word-wrap: break-word; }
+    .chat-msg-user { font-weight: 700; margin-right: 6px; }
+    .chat-msg-text { color: #e2e8f0; }
+    .chat-msg-time { color: #64748b; font-size: 11px; margin-left: 6px; }
+    .chat-empty { color: #64748b; font-size: 12px; text-align: center; padding: 12px 0; }
+    .chat-input-row { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
+    .chat-input-row input { flex: 1; margin: 0; padding: 8px 10px; font-size: 13px; }
+    .chat-input-row button { padding: 8px 14px; font-size: 13px; }
     .round-button { width: 48px; height: 48px; padding: 0; border-radius: 999px; border: 0; font-size: 20px; line-height: 1; background: rgba(15, 23, 42, 0.85); color: #f8fafc; box-shadow: 0 8px 18px rgba(2, 6, 23, 0.45); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
     .round-button:hover { background: rgba(30, 41, 59, 0.95); }
     .round-button.active { background: linear-gradient(90deg, #2563eb, #4f46e5); box-shadow: 0 8px 18px rgba(37, 99, 235, 0.35); }
@@ -215,7 +228,19 @@
     <button id="bottomLocateButton" class="round-button" type="button" title="Locate my nodes">⚑</button>
     <button id="bottomConnectionsButton" class="round-button" type="button" title="Connections">🔗</button>
     <button id="bottomConnectModeButton" class="round-button" type="button" title="Connect mode: drag from your node to a neighbor to link">🤝</button>
+    <button id="bottomChatButton" class="round-button" type="button" title="Chat">💬</button>
     <button id="bottomHelpButton" class="round-button" type="button" title="How to play">?</button>
+  </div>
+  <div id="chatPanel" class="overlay chat-panel hidden">
+    <div class="chat-header">
+      <span>💬 Chat</span>
+      <button id="closeChatButton" type="button" class="secondary" aria-label="Close">×</button>
+    </div>
+    <div id="chatMessages" class="chat-messages"></div>
+    <div class="chat-input-row">
+      <input id="chatInput" type="text" maxlength="200" placeholder="Type a message...">
+      <button id="chatSendButton" type="button" class="primary">Send</button>
+    </div>
   </div>
   <div class="overlay node-info hidden" id="nodeInfo">
     <div class="node-info-header">
@@ -407,7 +432,13 @@
     const bottomLocateButton = document.getElementById("bottomLocateButton");
     const bottomConnectionsButton = document.getElementById("bottomConnectionsButton");
     const bottomConnectModeButton = document.getElementById("bottomConnectModeButton");
+    const bottomChatButton = document.getElementById("bottomChatButton");
     const bottomHelpButton = document.getElementById("bottomHelpButton");
+    const chatPanel = document.getElementById("chatPanel");
+    const closeChatButton = document.getElementById("closeChatButton");
+    const chatMessagesEl = document.getElementById("chatMessages");
+    const chatInput = document.getElementById("chatInput");
+    const chatSendButton = document.getElementById("chatSendButton");
     const routeInfoHintEl = document.getElementById("routeInfoHint");
     const updateRouteRateButton = document.getElementById("updateRouteRateButton");
     const connectionCanvasEl = document.getElementById("connectionCanvas");
@@ -3452,8 +3483,80 @@
             scheduleVisibleTileRefresh(100, true);
           }
         }
+      } else if (message.type === "chatHistory") {
+        setChatMessages(Array.isArray(message.messages) ? message.messages : []);
+      } else if (message.type === "chat") {
+        if (message.message) {
+          appendChatMessage(message.message);
+        }
       }
     }
+
+    let chatMessages = [];
+    function escapeChatText(value) {
+      return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function formatChatTime(timestamp) {
+      try {
+        const d = new Date(Number(timestamp));
+        return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch {
+        return "";
+      }
+    }
+    function renderChatMessages() {
+      if (!chatMessages.length) {
+        chatMessagesEl.innerHTML = '<div class="chat-empty">No messages yet. Say hi!</div>';
+        return;
+      }
+      chatMessagesEl.innerHTML = chatMessages.map((msg) => {
+        const color = escapeChatText(msg.color || "#94a3b8");
+        return `<div class="chat-msg"><span class="chat-msg-user" style="color:${color}">${escapeChatText(msg.username || "?")}</span><span class="chat-msg-text">${escapeChatText(msg.text || "")}</span><span class="chat-msg-time">${formatChatTime(msg.timestamp)}</span></div>`;
+      }).join("");
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    }
+    function setChatMessages(messages) {
+      chatMessages = messages.slice(-50);
+      renderChatMessages();
+    }
+    function appendChatMessage(message) {
+      chatMessages.push(message);
+      if (chatMessages.length > 50) {
+        chatMessages = chatMessages.slice(-50);
+      }
+      renderChatMessages();
+    }
+    function sendChatMessage() {
+      const text = chatInput.value.trim();
+      if (!text) {
+        return;
+      }
+      if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
+        showToast("Chat is not connected. Try again in a moment.", "error");
+        return;
+      }
+      wsConnection.send(JSON.stringify({ type: "chat", text }));
+      chatInput.value = "";
+      chatInput.focus();
+    }
+    chatSendButton.addEventListener("click", sendChatMessage);
+    chatInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        sendChatMessage();
+      }
+    });
+    bottomChatButton?.addEventListener("click", () => {
+      const isHidden = chatPanel.classList.toggle("hidden");
+      bottomChatButton.classList.toggle("active", !isHidden);
+      if (!isHidden) {
+        renderChatMessages();
+        chatInput.focus();
+      }
+    });
+    closeChatButton?.addEventListener("click", () => {
+      chatPanel.classList.add("hidden");
+      bottomChatButton.classList.remove("active");
+    });
 
     function handleSessionExpired(message) {
       sessionToken = "";
