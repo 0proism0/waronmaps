@@ -161,6 +161,13 @@
     .chat-input-row { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
     .chat-input-row input { flex: 1; margin: 0; padding: 8px 10px; font-size: 13px; }
     .chat-input-row button { padding: 8px 14px; font-size: 13px; }
+    .lang-panel { position: absolute; left: 16px; bottom: 76px; width: min(200px, calc(100vw - 32px)); max-height: min(360px, calc(100vh - 160px)); overflow-y: auto; z-index: 7; padding: 10px; }
+    .lang-panel.hidden { display: none; }
+    .lang-title { font-size: 13px; font-weight: 800; color: #e2e8f0; margin-bottom: 8px; padding: 0 2px; }
+    .lang-list { display: flex; flex-direction: column; gap: 4px; }
+    .lang-option { text-align: left; padding: 8px 10px; font-size: 13px; border-radius: 8px; background: rgba(30, 41, 59, 0.5); color: #e2e8f0; border: 1px solid transparent; cursor: pointer; }
+    .lang-option:hover { background: rgba(51, 65, 85, 0.8); }
+    .lang-option.active { background: linear-gradient(90deg, #2563eb, #4f46e5); border-color: rgba(96, 165, 250, 0.4); }
     .round-button { position: relative; width: 48px; height: 48px; padding: 0; border-radius: 999px; border: 0; font-size: 20px; line-height: 1; background: rgba(15, 23, 42, 0.85); color: #f8fafc; box-shadow: 0 8px 18px rgba(2, 6, 23, 0.45); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
     .chat-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.4); pointer-events: none; }
     .chat-badge.hidden { display: none; }
@@ -235,7 +242,12 @@
     <button id="bottomConnectionsButton" class="round-button" type="button" title="Connections">🔗</button>
     <button id="bottomConnectModeButton" class="round-button" type="button" title="Connect mode: drag from your node to a neighbor to link">🤝</button>
     <button id="bottomChatButton" class="round-button" type="button" title="Chat">💬<span id="chatBadge" class="chat-badge hidden">0</span></button>
+    <button id="bottomLangButton" class="round-button" type="button" title="Language">🌐</button>
     <button id="bottomHelpButton" class="round-button" type="button" title="How to play">?</button>
+  </div>
+  <div id="langPanel" class="overlay lang-panel hidden">
+    <div class="lang-title">🌐 Language</div>
+    <div id="langList" class="lang-list"></div>
   </div>
   <div id="chatPanel" class="overlay chat-panel hidden">
     <div class="chat-header">
@@ -510,7 +522,170 @@
     const bottomConnectionsButton = document.getElementById("bottomConnectionsButton");
     const bottomConnectModeButton = document.getElementById("bottomConnectModeButton");
     const bottomChatButton = document.getElementById("bottomChatButton");
+    const bottomLangButton = document.getElementById("bottomLangButton");
     const bottomHelpButton = document.getElementById("bottomHelpButton");
+    const langPanel = document.getElementById("langPanel");
+    const langList = document.getElementById("langList");
+
+    // --- Language / i18n ---
+    const LANG_KEY = "waronmaps-lang-v1";
+    const LANGUAGES = [
+      { code: "en", label: "English" },
+      { code: "zh", label: "中文" },
+      { code: "es", label: "Español" },
+      { code: "fr", label: "Français" },
+      { code: "de", label: "Deutsch" },
+      { code: "pt", label: "Português" },
+      { code: "ja", label: "日本語" },
+      { code: "ko", label: "한국어" },
+      { code: "ru", label: "Русский" },
+      { code: "ar", label: "العربية" },
+    ];
+    const TRANSLATIONS = {
+      en: {
+        menu: "Menu", locate: "Locate My Nodes", howToPlay: "How to Play", chat: "Chat", connections: "Connections", connectMode: "Connect mode",
+        register: "Register", login: "Login", guest: "Play as Guest", logout: "Logout",
+        chooseStart: "Choose your starting location", gotIt: "Got it",
+        confirmStart: "Confirm starting location", confirmStartText: "Are you sure you want to start on this node?", yesStart: "Yes, start here", cancel: "Cancel",
+        nodeInfo: "Node Info", owner: "Owner", army: "Army", netPerTick: "Net per 1s tick", position: "Position",
+        fixed: "Fixed", relative: "Relative", leaderboard: "Leaderboard", armyTab: "Army", nodesTab: "Nodes",
+        send: "Send", typeMessage: "Type a message...", close: "Close",
+      },
+      zh: {
+        menu: "菜单", locate: "定位我的节点", howToPlay: "玩法说明", chat: "聊天", connections: "连接", connectMode: "连接模式",
+        register: "注册", login: "登录", guest: "游客游玩", logout: "退出登录",
+        chooseStart: "选择你的起始位置", gotIt: "知道了",
+        confirmStart: "确认起始位置", confirmStartText: "确定要在这个节点开始吗？", yesStart: "是的，从这里开始", cancel: "取消",
+        nodeInfo: "节点信息", owner: "所有者", army: "兵力", netPerTick: "每秒净变化", position: "位置",
+        fixed: "固定", relative: "相对", leaderboard: "排行榜", armyTab: "兵力", nodesTab: "节点",
+        send: "发送", typeMessage: "输入消息...", close: "关闭",
+      },
+      es: {
+        menu: "Menú", locate: "Localizar mis nodos", howToPlay: "Cómo jugar", chat: "Chat", connections: "Conexiones", connectMode: "Modo conexión",
+        register: "Registrarse", login: "Iniciar sesión", guest: "Jugar como invitado", logout: "Cerrar sesión",
+        chooseStart: "Elige tu ubicación inicial", gotIt: "Entendido",
+        confirmStart: "Confirmar ubicación inicial", confirmStartText: "¿Seguro que quieres empezar en este nodo?", yesStart: "Sí, empezar aquí", cancel: "Cancelar",
+        nodeInfo: "Info del nodo", owner: "Propietario", army: "Ejército", netPerTick: "Neto por tick", position: "Posición",
+        fixed: "Fijo", relative: "Relativo", leaderboard: "Clasificación", armyTab: "Ejército", nodesTab: "Nodos",
+        send: "Enviar", typeMessage: "Escribe un mensaje...", close: "Cerrar",
+      },
+      fr: {
+        menu: "Menu", locate: "Localiser mes nœuds", howToPlay: "Comment jouer", chat: "Chat", connections: "Connexions", connectMode: "Mode connexion",
+        register: "S'inscrire", login: "Se connecter", guest: "Jouer en invité", logout: "Se déconnecter",
+        chooseStart: "Choisissez votre point de départ", gotIt: "Compris",
+        confirmStart: "Confirmer le point de départ", confirmStartText: "Voulez-vous vraiment commencer sur ce nœud ?", yesStart: "Oui, commencer ici", cancel: "Annuler",
+        nodeInfo: "Info du nœud", owner: "Propriétaire", army: "Armée", netPerTick: "Net par tick", position: "Position",
+        fixed: "Fixe", relative: "Relatif", leaderboard: "Classement", armyTab: "Armée", nodesTab: "Nœuds",
+        send: "Envoyer", typeMessage: "Écrivez un message...", close: "Fermer",
+      },
+      de: {
+        menu: "Menü", locate: "Meine Knoten finden", howToPlay: "Spielanleitung", chat: "Chat", connections: "Verbindungen", connectMode: "Verbindungsmodus",
+        register: "Registrieren", login: "Anmelden", guest: "Als Gast spielen", logout: "Abmelden",
+        chooseStart: "Wähle deinen Startpunkt", gotIt: "Verstanden",
+        confirmStart: "Startpunkt bestätigen", confirmStartText: "Möchtest du wirklich auf diesem Knoten starten?", yesStart: "Ja, hier starten", cancel: "Abbrechen",
+        nodeInfo: "Knoten-Info", owner: "Besitzer", army: "Armee", netPerTick: "Netto pro Tick", position: "Position",
+        fixed: "Fest", relative: "Relativ", leaderboard: "Bestenliste", armyTab: "Armee", nodesTab: "Knoten",
+        send: "Senden", typeMessage: "Nachricht eingeben...", close: "Schließen",
+      },
+      pt: {
+        menu: "Menu", locate: "Localizar meus nós", howToPlay: "Como jogar", chat: "Chat", connections: "Conexões", connectMode: "Modo conexão",
+        register: "Registrar", login: "Entrar", guest: "Jogar como convidado", logout: "Sair",
+        chooseStart: "Escolha seu ponto inicial", gotIt: "Entendi",
+        confirmStart: "Confirmar ponto inicial", confirmStartText: "Tem certeza que quer começar neste nó?", yesStart: "Sim, começar aqui", cancel: "Cancelar",
+        nodeInfo: "Info do nó", owner: "Dono", army: "Exército", netPerTick: "Líquido por tick", position: "Posição",
+        fixed: "Fixo", relative: "Relativo", leaderboard: "Classificação", armyTab: "Exército", nodesTab: "Nós",
+        send: "Enviar", typeMessage: "Digite uma mensagem...", close: "Fechar",
+      },
+      ja: {
+        menu: "メニュー", locate: "自分のノードを探す", howToPlay: "遊び方", chat: "チャット", connections: "接続", connectMode: "接続モード",
+        register: "登録", login: "ログイン", guest: "ゲストでプレイ", logout: "ログアウト",
+        chooseStart: "開始地点を選んでください", gotIt: "わかりました",
+        confirmStart: "開始地点の確認", confirmStartText: "このノードで開始しますか？", yesStart: "はい、ここで開始", cancel: "キャンセル",
+        nodeInfo: "ノード情報", owner: "所有者", army: "兵力", netPerTick: "毎ティックの増減", position: "位置",
+        fixed: "固定", relative: "相対", leaderboard: "ランキング", armyTab: "兵力", nodesTab: "ノード",
+        send: "送信", typeMessage: "メッセージを入力...", close: "閉じる",
+      },
+      ko: {
+        menu: "메뉴", locate: "내 노드 찾기", howToPlay: "플레이 방법", chat: "채팅", connections: "연결", connectMode: "연결 모드",
+        register: "가입", login: "로그인", guest: "게스트로 플레이", logout: "로그아웃",
+        chooseStart: "시작 위치를 선택하세요", gotIt: "알겠습니다",
+        confirmStart: "시작 위치 확인", confirmStartText: "이 노드에서 시작하시겠습니까?", yesStart: "네, 여기서 시작", cancel: "취소",
+        nodeInfo: "노드 정보", owner: "소유자", army: "병력", netPerTick: "틱당 순변화", position: "위치",
+        fixed: "고정", relative: "상대", leaderboard: "리더보드", armyTab: "병력", nodesTab: "노드",
+        send: "전송", typeMessage: "메시지를 입력하세요...", close: "닫기",
+      },
+      ru: {
+        menu: "Меню", locate: "Найти мои узлы", howToPlay: "Как играть", chat: "Чат", connections: "Связи", connectMode: "Режим связи",
+        register: "Регистрация", login: "Войти", guest: "Играть как гость", logout: "Выйти",
+        chooseStart: "Выберите начальную точку", gotIt: "Понятно",
+        confirmStart: "Подтвердить начальную точку", confirmStartText: "Вы уверены, что хотите начать на этом узле?", yesStart: "Да, начать здесь", cancel: "Отмена",
+        nodeInfo: "Инфо об узле", owner: "Владелец", army: "Армия", netPerTick: "За тик", position: "Позиция",
+        fixed: "Фикс", relative: "Относит.", leaderboard: "Рейтинг", armyTab: "Армия", nodesTab: "Узлы",
+        send: "Отправить", typeMessage: "Введите сообщение...", close: "Закрыть",
+      },
+      ar: {
+        menu: "القائمة", locate: "حدد مواقع عقدي", howToPlay: "كيفية اللعب", chat: "الدردشة", connections: "الاتصالات", connectMode: "وضع الاتصال",
+        register: "تسجيل", login: "تسجيل الدخول", guest: "اللعب كضيف", logout: "تسجيل الخروج",
+        chooseStart: "اختر نقطة البداية", gotIt: "فهمت",
+        confirmStart: "تأكيد نقطة البداية", confirmStartText: "هل أنت متأكد أنك تريد البدء في هذه العقدة؟", yesStart: "نعم، ابدأ هنا", cancel: "إلغاء",
+        nodeInfo: "معلومات العقدة", owner: "المالك", army: "الجيش", netPerTick: "صافي لكل دورة", position: "الموقع",
+        fixed: "ثابت", relative: "نسبي", leaderboard: "المتصدرون", armyTab: "الجيش", nodesTab: "العقد",
+        send: "إرسال", typeMessage: "اكتب رسالة...", close: "إغلاق",
+      },
+    };
+    let currentLang = localStorage.getItem(LANG_KEY) || "en";
+    if (!TRANSLATIONS[currentLang]) currentLang = "en";
+    function t(key) {
+      return TRANSLATIONS[currentLang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
+    }
+    function applyLanguage() {
+      document.getElementById("locateNodesButton").textContent = t("locate");
+      document.getElementById("showTutorialButton").textContent = `❓ ${t("howToPlay")}`;
+      document.getElementById("registerButton").textContent = t("register");
+      document.getElementById("loginButton").textContent = t("login");
+      document.getElementById("guestButton").textContent = t("guest");
+      document.getElementById("logoutButton").textContent = t("logout");
+      document.getElementById("nodeInfoTitle").textContent = t("nodeInfo");
+      document.getElementById("sendModeFixedButton").textContent = `📌 ${t("fixed")}`;
+      document.getElementById("sendModeRelativeButton").textContent = `📈 ${t("relative")}`;
+      document.getElementById("chatSendButton").textContent = t("send");
+      document.getElementById("chatInput").placeholder = t("typeMessage");
+      document.getElementById("closeNodeInfoButton").textContent = t("close");
+      document.getElementById("startGotItButton").textContent = t("gotIt");
+      document.getElementById("startConfirmYes").textContent = t("yesStart");
+      document.getElementById("startConfirmNo").textContent = t("cancel");
+      document.getElementById("leaderboardTabArmy").textContent = `⚔️ ${t("armyTab")}`;
+      document.getElementById("leaderboardTabNodes").textContent = `🗺️ ${t("nodesTab")}`;
+      bottomMenuButton.title = t("menu");
+      bottomLocateButton.title = t("locate");
+      bottomConnectionsButton.title = t("connections");
+      bottomConnectModeButton.title = t("connectMode");
+      bottomChatButton.title = t("chat");
+      bottomHelpButton.title = t("howToPlay");
+    }
+    function renderLanguageList() {
+      langList.replaceChildren();
+      for (const lang of LANGUAGES) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `lang-option${lang.code === currentLang ? " active" : ""}`;
+        btn.textContent = lang.label;
+        btn.addEventListener("click", () => {
+          currentLang = lang.code;
+          localStorage.setItem(LANG_KEY, currentLang);
+          applyLanguage();
+          renderLanguageList();
+        });
+        langList.appendChild(btn);
+      }
+    }
+    bottomLangButton?.addEventListener("click", () => {
+      const isHidden = langPanel.classList.toggle("hidden");
+      bottomLangButton.classList.toggle("active", !isHidden);
+      if (!isHidden) {
+        renderLanguageList();
+      }
+    });
     const chatPanel = document.getElementById("chatPanel");
     const closeChatButton = document.getElementById("closeChatButton");
     const chatBadge = document.getElementById("chatBadge");
@@ -4141,6 +4316,7 @@
       }
       setSendMode("fixed");
       setSendPerTickValue(DEFAULT_SEND_PER_TICK);
+      applyLanguage();
       loadPanelState();
       fetchLeaderboard();
       const storedBuildStatus = loadStoredBuildStatus();
