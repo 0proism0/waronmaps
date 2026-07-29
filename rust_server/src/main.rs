@@ -3805,6 +3805,9 @@ fn handle_request(app: &Arc<App>, mut request: Request) {
                     .ok_or_else(|| "Invalid node.".to_string())?;
                 Ok(json_response(200, &app.claim_start_node_request(token, &node_id)?))
             }
+            (&Method::Get, "/health") => {
+                Ok(json_response(200, &json!({ "status": "ok", "timestamp": now_ms() })))
+            }
             (&Method::Get, "/api/game-state") => {
                 let token = extract_bearer_token(&request);
                 let include_nodes = query.get("view").map(String::as_str) != Some("summary");

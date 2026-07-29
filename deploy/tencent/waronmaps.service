@@ -10,6 +10,10 @@ EnvironmentFile=-/etc/waronmaps.env
 ExecStart=__ROOT_DIR__/rust_server/target/release/node_game_server 8002
 Restart=on-failure
 RestartSec=5
+# Keep logs bounded so they don't fill the disk over time.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=waronmaps
 
 [Install]
 WantedBy=multi-user.target

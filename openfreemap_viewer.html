@@ -245,6 +245,7 @@
     <button id="bottomConnectModeButton" class="round-button" type="button" title="Connect mode: drag from your node to a neighbor to link">🤝</button>
     <button id="bottomChatButton" class="round-button" type="button" title="Chat">💬<span id="chatBadge" class="chat-badge hidden">0</span></button>
     <button id="bottomLangButton" class="round-button" type="button" title="Language">🌐</button>
+    <button id="bottomSoundButton" class="round-button" type="button" title="Sound on/off">🔊</button>
     <button id="bottomHelpButton" class="round-button" type="button" title="How to play">?</button>
   </div>
   <div id="langPanel" class="overlay lang-panel hidden">
@@ -527,6 +528,7 @@
     const bottomConnectModeButton = document.getElementById("bottomConnectModeButton");
     const bottomChatButton = document.getElementById("bottomChatButton");
     const bottomLangButton = document.getElementById("bottomLangButton");
+    const bottomSoundButton = document.getElementById("bottomSoundButton");
     const bottomHelpButton = document.getElementById("bottomHelpButton");
     const langPanel = document.getElementById("langPanel");
     const langList = document.getElementById("langList");
@@ -1393,6 +1395,7 @@
           nextFeatures.push(response.attack);
           setAttackFeatures(nextFeatures);
           const computedRate = Number(response.attack?.properties?.sendPerTick || sendPerTick);
+          playSound("link");
           showToast(String(targetFeature?.properties?.ownerState || "") === "self"
             ? `Transfer started at ${formatTickRate(computedRate)}.`
             : `Attack started at ${formatTickRate(computedRate)}.`, "success");
@@ -3823,6 +3826,71 @@
       }
       renderChatMessages();
     }
+    // --- Sound effects (WebAudio, no assets) ---
+    const SOUND_KEY = "waronmaps-sound-v1";
+    let soundEnabled = localStorage.getItem(SOUND_KEY) !== "off";
+    let audioCtx = null;
+    function getAudioCtx() {
+      if (!audioCtx) {
+        try {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch {
+          audioCtx = null;
+        }
+      }
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume().catch(() => {});
+      }
+      return audioCtx;
+    }
+    function playTone(freq, durationMs, type = "sine", volume = 0.15, when = 0) {
+      if (!soundEnabled) return;
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      try {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        const t0 = ctx.currentTime + when;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationMs / 1000);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t0);
+        osc.stop(t0 + durationMs / 1000 + 0.02);
+      } catch {}
+    }
+    function playSound(kind) {
+      if (!soundEnabled) return;
+      if (kind === "capture") {
+        playTone(523, 120, "triangle", 0.18, 0);
+        playTone(784, 160, "triangle", 0.18, 0.1);
+      } else if (kind === "attack") {
+        playTone(220, 140, "sawtooth", 0.12, 0);
+      } else if (kind === "lost") {
+        playTone(330, 200, "sine", 0.16, 0);
+        playTone(196, 300, "sine", 0.16, 0.16);
+      } else if (kind === "link") {
+        playTone(660, 70, "sine", 0.1, 0);
+      } else if (kind === "click") {
+        playTone(440, 40, "sine", 0.06, 0);
+      }
+    }
+    function updateSoundButton() {
+      bottomSoundButton.textContent = soundEnabled ? "🔊" : "🔇";
+      bottomSoundButton.classList.toggle("active", soundEnabled);
+    }
+    bottomSoundButton?.addEventListener("click", () => {
+      soundEnabled = !soundEnabled;
+      localStorage.setItem(SOUND_KEY, soundEnabled ? "on" : "off");
+      updateSoundButton();
+      if (soundEnabled) {
+        playSound("click");
+      }
+    });
+    updateSoundButton();
+
     // Combat notifications: toast when the player's nodes are attacked or captured.
     let seenCombatEventKeys = new Set();
     let combatEventsPrimed = false;
@@ -3854,11 +3922,14 @@
         if (ev.kind === "capture") {
           if (isDefender) {
             showToast(`⚠️ ${ev.attackerName || "An enemy"} captured ${name} from you!`, "error");
+            playSound("lost");
           } else if (isAttacker) {
             showToast(`🏴 You captured ${name}${ev.defenderName ? ` from ${ev.defenderName}` : ""}!`, "success");
+            playSound("capture");
           }
         } else if (ev.kind === "attack" && isDefender) {
           showToast(`⚔️ ${ev.attackerName || "An enemy"} is attacking ${name}!`, "error");
+          playSound("attack");
         }
       }
     }

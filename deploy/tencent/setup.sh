@@ -79,6 +79,15 @@ sed -i "s|__USER__|$RUN_USER|g" /etc/systemd/system/waronmaps.service
 systemctl daemon-reload
 systemctl enable waronmaps
 
+# Bound journald log size so game/server logs can't fill the disk.
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/waronmaps.conf <<'EOF'
+[Journal]
+SystemMaxUse=200M
+MaxFileSec=1week
+EOF
+systemctl restart systemd-journald || true
+
 if [[ ! -f /etc/waronmaps.env ]]; then
   cat > /etc/waronmaps.env <<'EOF'
 # Set your Neon connection string, then restart the service:
