@@ -29,6 +29,7 @@ const ARMY_CAP: i64 = 1_000_000;
 const MAX_CHAT_MESSAGES: usize = 50;
 const CHAT_MAX_LEN: usize = 200;
 const CHAT_MIN_INTERVAL_MS: i64 = 2000;
+const MAX_COMBAT_EVENTS: usize = 30;
 const CITY_RADIUS_KM: f64 = 2.0;
 const BARRACKS_COST: i64 = 100_000;
 const CITY_COST: i64 = 100_000_000;
@@ -340,6 +341,19 @@ struct ChatMessage {
     timestamp: i64,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CombatEvent {
+    kind: String, // "attack" | "capture"
+    attacker_id: String,
+    attacker_name: String,
+    defender_id: Option<String>,
+    defender_name: Option<String>,
+    node_id: String,
+    node_name: String,
+    timestamp: i64,
+}
+
 struct AppData {
     state: GameState,
     node_repo: NodeRepo,
@@ -360,6 +374,8 @@ struct AppData {
     // In-memory chat: last N messages + per-player rate limiting.
     chat_messages: std::collections::VecDeque<ChatMessage>,
     chat_last_sent: HashMap<String, i64>,
+    // Recent combat events (attacks + captures) for notifications.
+    combat_events: std::collections::VecDeque<CombatEvent>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -480,6 +496,7 @@ impl App {
                 ticks_since_session_purge: 0,
                 chat_messages: std::collections::VecDeque::new(),
                 chat_last_sent: HashMap::new(),
+                combat_events: std::collections::VecDeque::new(),
             }),
             ws_update_sender,
         })
@@ -2043,6 +2060,7 @@ impl App {
                 continue;
             }
 
+            let mut captured = false;
             if let Some(target_node) = data.state.nodes.get_mut(&attack.to_node_id) {
                 // Hospitals provide damage reduction against enemy attacks.
                 let mut effective_flow = flow as f64;
@@ -2055,6 +2073,7 @@ impl App {
                 let damage = effective_flow as i64;
                 target_node.army -= damage;
                 if target_node.army < 0 {
+                    captured = true;
                     let had_building = target_node.building.is_some();
                     target_node.owner_id = Some(attack.owner_id.clone());
                     target_node.army = target_node.army.abs().max(1);
@@ -2072,6 +2091,36 @@ impl App {
                         existing_attack.mode = "transfer".to_string();
                     }
                 }
+            }
+            // Record combat events after the mutable node borrow has ended.
+            if target_snapshot.owner_id.as_deref() != Some(attack.owner_id.as_str()) {
+                let attacker_name = data
+                    .state
+                    .players
+                    .get(&attack.owner_id)
+                    .map(|p| p.username.clone())
+                    .unwrap_or_else(|| "?".to_string());
+                let defender_name = target_snapshot
+                    .owner_id
+                    .as_deref()
+                    .and_then(|id| data.state.players.get(id))
+                    .map(|p| p.username.clone());
+                let node_name = data
+                    .node_repo
+                    .display_names
+                    .get(&attack.to_node_id)
+                    .map(|n| clean_node_display_name(n))
+                    .unwrap_or_else(|| "Intersection".to_string());
+                self.record_combat_event_locked(data, CombatEvent {
+                    kind: if captured { "capture".to_string() } else { "attack".to_string() },
+                    attacker_id: attack.owner_id.clone(),
+                    attacker_name,
+                    defender_id: target_snapshot.owner_id.clone(),
+                    defender_name,
+                    node_id: attack.to_node_id.clone(),
+                    node_name,
+                    timestamp: now_ms(),
+                });
             }
         }
 
@@ -2520,7 +2569,8 @@ impl App {
             "attacks": {
                 "type": "FeatureCollection",
                 "features": attack_features
-            }
+            },
+            "combatEvents": data.combat_events.iter().collect::<Vec<_>>()
         }))
     }
 
@@ -2977,6 +3027,13 @@ impl App {
             "sendMode": send_mode,
             "sendPercent": send_percent
         }))
+    }
+
+    fn record_combat_event_locked(&self, data: &mut AppData, event: CombatEvent) {
+        data.combat_events.push_back(event);
+        while data.combat_events.len() > MAX_COMBAT_EVENTS {
+            data.combat_events.pop_front();
+        }
     }
 
     fn chat_history_json(&self) -> String {

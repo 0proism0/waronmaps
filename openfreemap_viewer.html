@@ -168,6 +168,8 @@
     .lang-option { text-align: left; padding: 8px 10px; font-size: 13px; border-radius: 8px; background: rgba(30, 41, 59, 0.5); color: #e2e8f0; border: 1px solid transparent; cursor: pointer; }
     .lang-option:hover { background: rgba(51, 65, 85, 0.8); }
     .lang-option.active { background: linear-gradient(90deg, #2563eb, #4f46e5); border-color: rgba(96, 165, 250, 0.4); }
+    .army-rate-stat strong { color: #fbbf24; font-size: 15px; text-shadow: 0 0 8px rgba(251, 191, 36, 0.4); }
+    .army-rate-stat input { width: 70px; margin: 0 0 0 6px; padding: 3px 6px; font-size: 13px; }
     .round-button { position: relative; width: 48px; height: 48px; padding: 0; border-radius: 999px; border: 0; font-size: 20px; line-height: 1; background: rgba(15, 23, 42, 0.85); color: #f8fafc; box-shadow: 0 8px 18px rgba(2, 6, 23, 0.45); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
     .chat-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.4); pointer-events: none; }
     .chat-badge.hidden { display: none; }
@@ -270,6 +272,7 @@
       <div class="stat"><span>Node</span><strong id="nodeInfoId">None</strong></div>
       <div class="stat"><span>Owner</span><strong id="nodeInfoOwner">No node selected</strong></div>
       <div class="stat"><span>Army</span><strong id="nodeInfoArmy">0</strong></div>
+      <div class="stat army-rate-stat"><span>Army per tick</span><strong id="nodeInfoRate">-</strong></div>
       <div class="stat"><span>Net per 1s tick</span><strong id="nodeInfoDelta">0</strong></div>
       <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
@@ -510,6 +513,7 @@
     const nodeInfoOwnerEl = document.getElementById("nodeInfoOwner");
     const nodeInfoArmyEl = document.getElementById("nodeInfoArmy");
     const nodeInfoDeltaEl = document.getElementById("nodeInfoDelta");
+    const nodeInfoRateEl = document.getElementById("nodeInfoRate");
     const nodeInfoPositionEl = document.getElementById("nodeInfoPosition");
     const sendPerTickInput = document.getElementById("sendPerTickInput");
     const sendAmountLabel = document.getElementById("sendAmountLabel");
@@ -2302,6 +2306,7 @@
         nodeInfoIdEl.textContent = "None";
         nodeInfoOwnerEl.textContent = "No node selected";
         nodeInfoArmyEl.textContent = "0";
+        nodeInfoRateEl.textContent = "-";
         nodeInfoDeltaEl.textContent = "0";
         nodeInfoPositionEl.textContent = "-";
         if (FEATURE_BUILDINGS) {
@@ -2329,6 +2334,23 @@
       nodeInfoArmyEl.textContent = Number(feature.properties?.army || 0).toLocaleString();
       nodeInfoDeltaEl.textContent = formatSignedTickRate(perTick.net);
       nodeInfoPositionEl.textContent = coords ? `${coords[1].toFixed(4)}, ${coords[0].toFixed(4)}` : "-";
+      // Highlight the army/tick of the active route from the selected node to
+      // this inspected node, with an inline editor for regular (fixed) links.
+      const inspectedId = String(feature.properties?.id || "");
+      const activeRoute = selectedNodeId && inspectedId && inspectedId !== selectedNodeId
+        ? findAttackFeature(selectedNodeId, inspectedId)
+        : null;
+      if (activeRoute) {
+        const routeSendMode = String(activeRoute.properties?.sendMode || "fixed");
+        const rate = routeRatePerTick(activeRoute.properties || {});
+        if (routeSendMode === "long") {
+          nodeInfoRateEl.textContent = `${rate.toFixed(2)}/tick (irregular, fixed)`;
+        } else {
+          nodeInfoRateEl.textContent = `${rate.toLocaleString()}/tick`;
+        }
+      } else {
+        nodeInfoRateEl.textContent = "-";
+      }
       if (FEATURE_BUILDINGS) {
         const building = feature.properties?.building || null;
         nodeInfoBuildingEl.textContent = building || "None";
@@ -3801,6 +3823,46 @@
       }
       renderChatMessages();
     }
+    // Combat notifications: toast when the player's nodes are attacked or captured.
+    let seenCombatEventKeys = new Set();
+    let combatEventsPrimed = false;
+    function processCombatEvents(events) {
+      if (!Array.isArray(events) || !currentPlayerId) {
+        return;
+      }
+      // On first load, mark existing events as seen so we don't spam old history.
+      if (!combatEventsPrimed) {
+        combatEventsPrimed = true;
+        for (const ev of events) {
+          seenCombatEventKeys.add(`${ev.kind}|${ev.nodeId}|${ev.attackerId}|${ev.timestamp}`);
+        }
+        return;
+      }
+      for (const ev of events) {
+        const key = `${ev.kind}|${ev.nodeId}|${ev.attackerId}|${ev.timestamp}`;
+        if (seenCombatEventKeys.has(key)) {
+          continue;
+        }
+        seenCombatEventKeys.add(key);
+        if (seenCombatEventKeys.size > 500) {
+          seenCombatEventKeys = new Set(Array.from(seenCombatEventKeys).slice(-250));
+        }
+        // Only notify about events involving the current player.
+        const isDefender = String(ev.defenderId || "") === String(currentPlayerId);
+        const isAttacker = String(ev.attackerId || "") === String(currentPlayerId);
+        const name = ev.nodeName || "a node";
+        if (ev.kind === "capture") {
+          if (isDefender) {
+            showToast(`⚠️ ${ev.attackerName || "An enemy"} captured ${name} from you!`, "error");
+          } else if (isAttacker) {
+            showToast(`🏴 You captured ${name}${ev.defenderName ? ` from ${ev.defenderName}` : ""}!`, "success");
+          }
+        } else if (ev.kind === "attack" && isDefender) {
+          showToast(`⚔️ ${ev.attackerName || "An enemy"} is attacking ${name}!`, "error");
+        }
+      }
+    }
+
     function sendChatMessage() {
       const text = chatInput.value.trim();
       if (!text) {
@@ -3862,6 +3924,7 @@
         lastOwnedFeatures = ownedFeatures;
         saveOwnedNodesCache(currentPlayerId, ownedFeatures);
         setAttackFeatures(state.attacks?.features || []);
+        processCombatEvents(state.combatEvents || []);
         if (state.player) {
           if (ownedFeatures.length) {
             authSummaryEl.textContent = `Logged in as ${state.player.username}. You own ${ownedFeatures.length} green nodes.`;
