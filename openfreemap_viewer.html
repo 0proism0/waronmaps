@@ -633,8 +633,21 @@
         send: "إرسال", typeMessage: "اكتب رسالة...", close: "إغلاق",
       },
     };
-    let currentLang = localStorage.getItem(LANG_KEY) || "en";
-    if (!TRANSLATIONS[currentLang]) currentLang = "en";
+    // Detect the player's language from their browser/locale. If it's not one
+    // we support, fall back to Chinese.
+    function detectLanguage() {
+      const saved = localStorage.getItem(LANG_KEY);
+      if (saved && TRANSLATIONS[saved]) {
+        return saved;
+      }
+      const locale = (navigator.language || navigator.userLanguage || "").toLowerCase();
+      const primary = locale.split("-")[0];
+      if (TRANSLATIONS[primary]) {
+        return primary;
+      }
+      return "zh";
+    }
+    let currentLang = detectLanguage();
     function t(key) {
       return TRANSLATIONS[currentLang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
     }
