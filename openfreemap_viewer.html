@@ -194,7 +194,7 @@
       <button id="hidePanelButton" class="panel-close secondary" type="button" aria-label="Close">×</button>
     </div>
     <div class="panel-body">
-      <p class="panel-subtitle">White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.</p>
+      <p class="panel-subtitle"></p>
       <div class="section">
         <div id="authSummary" class="status">Register or log in first. Then click a neutral node on the map to claim your starting territory.</div>
         <input id="usernameInput" placeholder="username" autocomplete="username">
@@ -265,7 +265,7 @@
   </div>
   <div class="overlay node-info hidden" id="nodeInfo">
     <div class="node-info-header">
-      <strong id="nodeInfoTitle">Node Info</strong>
+      <strong id="nodeInfoTitle"></strong>
       <button id="closeNodeInfoButton" type="button" class="secondary" aria-label="Close" style="padding: 4px 10px; font-size: 12px;">Close</button>
     </div>
     <div class="node-info-body">
@@ -324,20 +324,20 @@
   <div id="tutorialOverlay" class="tutorial-overlay">
     <div class="tutorial-card">
       <div class="tutorial-step active" data-step="0">
-        <div class="tutorial-title">Welcome to WARONMAPS</div>
-        <div class="tutorial-text">This is a persistent multiplayer strategy game played on real road intersections. Register, log in, or Play as Guest first, then click a neutral node on the map to claim your starting territory.</div>
+        <div class="tutorial-title" data-i18n="tutorialWelcome">Welcome</div>
+        <div class="tutorial-text" data-i18n="tutorialWelcomeText">Welcome text</div>
       </div>
       <div class="tutorial-step" data-step="1">
-        <div class="tutorial-title">Find your nodes</div>
-        <div class="tutorial-text">After you claim a neutral node, the map will center on your owned nodes. Each node generates +1 army every few seconds, up to a cap of 1 million.</div>
+        <div class="tutorial-title" data-i18n="tutorialFind">Find nodes</div>
+        <div class="tutorial-text" data-i18n="tutorialFindText">Find text</div>
       </div>
       <div class="tutorial-step" data-step="2">
-        <div class="tutorial-title">Make a connection</div>
-        <div class="tutorial-text">Hold Space and drag from one of your owned nodes to an adjacent node. A dotted line will follow your cursor; release on the target to open a road connection that moves troops every tick.</div>
+        <div class="tutorial-title" data-i18n="tutorialConnect">Make a connection</div>
+        <div class="tutorial-text" data-i18n="tutorialConnectText">Connect text</div>
       </div>
       <div class="tutorial-step" data-step="3">
-        <div class="tutorial-title">Adjust your army flow</div>
-        <div class="tutorial-text">Use the bottom-right panel to change how many troops to send per tick. Higher rates capture or reinforce faster.</div>
+        <div class="tutorial-title" data-i18n="tutorialAdjust">Adjust your army flow</div>
+        <div class="tutorial-text" data-i18n="tutorialAdjustText">Adjust text</div>
       </div>
       <div class="tutorial-dots">
         <span class="tutorial-dot active"></span>
@@ -346,8 +346,8 @@
         <span class="tutorial-dot"></span>
       </div>
       <div class="tutorial-actions">
-        <button id="tutorialSkipButton" type="button" class="secondary">Skip</button>
-        <button id="tutorialNextButton" type="button">Next</button>
+        <button id="tutorialSkipButton" type="button" class="secondary" data-i18n="skip">Skip</button>
+        <button id="tutorialNextButton" type="button" data-i18n="next">Next</button>
       </div>
     </div>
   </div>
@@ -582,6 +582,15 @@
         loadingGame: "Loading", connectingServer: "Connecting to game server...", preparingNodes: "Preparing nodes...",
         loadedNodes: "Loaded {n} nodes. Starting map...", waitingAttempt: "Waiting for server... ({n})", failedStart: "Failed to start: {err}",
         noActiveRoute: "No active route is selected. Create the connection first, then update its send rate here.",
+        loggedInAs: "Logged in as {name}. You own {n} green nodes.", claimTerritory: "Logged in as {name}. Click a neutral node to claim your starting territory.",
+        centeredNodes: "Centered on your green nodes.", loginToLocate: "Log in first, then generate or load your green nodes before locating them.",
+        tutorialWelcome: "Welcome to Fight and Conquer", tutorialFind: "Find your nodes", tutorialConnect: "Make a connection", tutorialAdjust: "Adjust your army flow",
+        tutorialWelcomeText: "This is a persistent multiplayer strategy game played on real road intersections. Register, log in, or Play as Guest first, then click a neutral node on the map to claim your starting territory.",
+        tutorialFindText: "After you claim a neutral node, the map will center on your green nodes. Each node generates +1 army every few seconds, up to a cap of 1 million.",
+        tutorialConnectText: "Hold Space and drag from one of your owned nodes to an adjacent node. A dotted line will follow your cursor; release on the target to open a road connection that moves troops every tick.",
+        tutorialAdjustText: "Use the bottom-right panel to change how many troops to send per tick. Higher rates capture or reinforce faster.",
+        next: "Next", play: "Play", skip: "Skip", intersection: "Intersection", you: "You", enemy: "Enemy", neutral: "Neutral",
+        nodeLabel: "Node", noNodeSelected: "No node selected", unnamedRoad: "Unnamed Road",
       },
       zh: {
         menu: "菜单", locate: "定位我的节点", howToPlay: "玩法说明", chat: "聊天", connections: "连接", connectMode: "连接模式",
@@ -617,6 +626,15 @@
         loadingGame: "加载中", connectingServer: "正在连接游戏服务器...", preparingNodes: "正在准备节点...",
         loadedNodes: "已加载 {n} 个节点。正在启动地图...", waitingAttempt: "等待服务器...（{n}）", failedStart: "启动失败：{err}",
         noActiveRoute: "未选择活动路线。请先创建连接，然后在此更新其发送速率。",
+        loggedInAs: "已登录为 {name}。你拥有 {n} 个绿色节点。", claimTerritory: "已登录为 {name}。点击一个中立节点来占领你的起始领地。",
+        centeredNodes: "已定位到你的绿色节点。", loginToLocate: "请先登录，然后生成或加载你的绿色节点再进行定位。",
+        tutorialWelcome: "欢迎来到《征服之路》", tutorialFind: "找到你的节点", tutorialConnect: "建立连接", tutorialAdjust: "调整你的兵力流",
+        tutorialWelcomeText: "这是一款基于真实道路交叉口的持久多人策略游戏。先注册、登录或以游客身份游玩，然后点击地图上的中立节点来占领你的起始领地。",
+        tutorialFindText: "占领中立节点后，地图会定位到你的绿色节点。每个节点每几秒产生 +1 兵力，上限为 100 万。",
+        tutorialConnectText: "按住空格并从你的节点拖动到相邻节点。虚线会跟随你的光标；在目标上松开以打开一条每次移动兵力的道路连接。",
+        tutorialAdjustText: "使用右下角面板更改每次发送的兵力数量。更高的速率可以更快地占领或增援。",
+        next: "下一步", play: "开始", skip: "跳过", intersection: "交叉口", you: "你", enemy: "敌人", neutral: "中立",
+        nodeLabel: "节点", noNodeSelected: "未选择节点", unnamedRoad: "未命名道路",
       },
       es: {
         menu: "Menú", locate: "Localizar mis nodos", howToPlay: "Cómo jugar", chat: "Chat", connections: "Conexiones", connectMode: "Modo conexión",
@@ -817,7 +835,7 @@
       bottomSoundButton.title = t("sound");
       // Panel + stats + info panel
       const subtitle = document.querySelector(".panel-subtitle");
-      if (subtitle) subtitle.textContent = t("panelSubtitle");
+      if (subtitle) subtitle.textContent = "";
       const liveStatsTitle = document.querySelector(".section-title");
       if (liveStatsTitle) liveStatsTitle.textContent = `📊 ${t("liveStats")}`;
       document.getElementById("status").textContent = t("waitingForServer");
@@ -1327,9 +1345,16 @@
       }
       return effectiveFlowByAttackKey;
     }
+    function displayNodeName(rawName) {
+      const name = String(rawName || "");
+      if (name === "Unnamed Road") {
+        return t("unnamedRoad");
+      }
+      return name || t("intersection");
+    }
     function nodeDisplayNameById(nodeId) {
       const feature = renderedNodeFeatures.find((item) => String(item?.properties?.id || "") === String(nodeId));
-      return feature?.properties?.displayName || "Intersection";
+      return displayNodeName(feature?.properties?.displayName);
     }
     function routeSummaryLabel(feature, nodeId) {
       const fromId = String(feature?.properties?.fromNodeId || "");
@@ -1380,10 +1405,10 @@
         topEl.className = "route-row-top";
         const titleEl = document.createElement("div");
         titleEl.className = "route-row-title";
-        titleEl.textContent = `Node ${targetNodeId}`;
+        titleEl.textContent = `${t("nodeLabel")} ${targetNodeId}`;
         const modeEl = document.createElement("div");
         modeEl.className = "route-row-mode";
-        modeEl.textContent = `${nodeOwnerLabel(targetFeature)} · ${Number(targetFeature?.properties?.army || 0).toLocaleString()} army`;
+        modeEl.textContent = `${nodeOwnerLabel(targetFeature)} · ${Number(targetFeature?.properties?.army || 0).toLocaleString()} ${t("army")}`;
         topEl.append(titleEl, modeEl);
         rowEl.append(topEl);
         rowEl.addEventListener("mouseenter", () => {
@@ -1751,9 +1776,7 @@
         return;
       }
       updateRouteRateButton.disabled = true;
-      routeInfoHintEl.textContent = selectedNodeId
-        ? `Sender ${selectedNodeId}. Hold Space and drag to an adjacent node to link.`
-        : "Click one of your nodes, then hold Space and drag to an adjacent node to link.";
+      routeInfoHintEl.textContent = "";
     }
     function nodeDisplayOffsetDegrees(index, total, lat) {
       if (total <= 1) {
@@ -2090,7 +2113,7 @@
     function updateTutorialStep() {
       tutorialSteps.forEach((step, idx) => step.classList.toggle("active", idx === tutorialStepIndex));
       tutorialDots.forEach((dot, idx) => dot.classList.toggle("active", idx === tutorialStepIndex));
-      tutorialNextButton.textContent = tutorialStepIndex >= tutorialSteps.length - 1 ? "Play" : "Next";
+      tutorialNextButton.textContent = tutorialStepIndex >= tutorialSteps.length - 1 ? t("play") : t("next");
     }
     function showTutorial() {
       tutorialStepIndex = 0;
@@ -2453,17 +2476,17 @@
 
     function selectedNodeSummary(feature = selectedNodeFeature) {
       if (!feature) {
-        return "None";
+        return t("none");
       }
-      const name = feature.properties?.displayName || "Intersection";
-      return `${name} (${Number(feature.properties.army || 0).toLocaleString()} army)`;
+      const name = displayNodeName(feature.properties?.displayName);
+      return `${name} (${Number(feature.properties.army || 0).toLocaleString()} ${t("army")})`;
     }
 
     function nodeOwnerLabel(feature) {
       const ownerState = String(feature?.properties?.ownerState || "");
-      if (ownerState === "self") return "You";
-      if (ownerState === "enemy") return String(feature?.properties?.ownerUsername || "Enemy");
-      return "Neutral";
+      if (ownerState === "self") return t("you");
+      if (ownerState === "enemy") return String(feature?.properties?.ownerUsername || t("enemy"));
+      return t("neutral");
     }
 
     function updateNodeInfo(feature = null) {
@@ -2473,19 +2496,19 @@
       }
       if (!feature) {
         nodeInfoEl.classList.add("hidden");
-        nodeInfoTitleEl.textContent = "Node Info";
-        nodeInfoIdEl.textContent = "None";
-        nodeInfoOwnerEl.textContent = "No node selected";
+        nodeInfoTitleEl.textContent = "";
+        nodeInfoIdEl.textContent = t("none");
+        nodeInfoOwnerEl.textContent = t("noNodeSelected");
         nodeInfoArmyEl.textContent = "0";
         nodeInfoRateEl.textContent = "-";
         nodeInfoDeltaEl.textContent = "0";
         nodeInfoPositionEl.textContent = "-";
         if (FEATURE_BUILDINGS) {
-          nodeInfoBuildingEl.textContent = "None";
+          nodeInfoBuildingEl.textContent = t("none");
         }
         updateBuildControls(null);
         updateSiloControls(null);
-        nodeInfoStatusEl.textContent = "Click a node.";
+        nodeInfoStatusEl.textContent = t("clickNodeToInspect");
         updateRouteControls(null);
         clearSelectedNodeTargets();
         renderNodeRouteList(null);
@@ -2498,7 +2521,7 @@
       nodeInfoEl.classList.remove("hidden");
       const coords = actualNodeCoordinates(feature);
       const perTick = nodeNetPerTick(feature);
-      const displayName = feature.properties?.displayName || "Intersection";
+      const displayName = displayNodeName(feature.properties?.displayName);
       nodeInfoTitleEl.textContent = displayName;
       nodeInfoIdEl.textContent = displayName;
       nodeInfoOwnerEl.textContent = nodeOwnerLabel(feature);
@@ -2875,7 +2898,7 @@
       selectedNodeId = null;
       selectedNodeFeature = null;
       hoveredAttackKey = null;
-      selectedNodeTextEl.textContent = "None";
+      selectedNodeTextEl.textContent = t("none");
       clearSelectedNodeTargets();
       clearConnectableTargets();
       updateHoveredNodeHighlight(null);
@@ -2895,7 +2918,9 @@
       selectedNodeTextEl.textContent = selectedNodeSummary(feature);
       clearConnectableTargets();
       void refreshSelectedNodeTargets();
-      setStatus(statusMessage || tr("selectedNodeStatus", { id: nodeId }));
+      if (statusMessage) {
+        setStatus(statusMessage);
+      }
     }
 
     function defaultStatusMessage() {
@@ -2908,9 +2933,7 @@
     function updateSelectionStatus() {
       if (!selectedNodeFeature) {
         setStatus(defaultStatusMessage());
-        return;
       }
-      setStatus(tr("selectedNodeStatus", { id: selectedNodeId }));
     }
 
     function mouseEventToMapPoint(event) {
@@ -4166,12 +4189,12 @@
         processCombatEvents(state.combatEvents || []);
         if (state.player) {
           if (ownedFeatures.length) {
-            authSummaryEl.textContent = `Logged in as ${state.player.username}. You own ${ownedFeatures.length} green nodes.`;
+            authSummaryEl.textContent = tr("loggedInAs", { name: state.player.username, n: ownedFeatures.length });
           } else {
-            authSummaryEl.textContent = `Logged in as ${state.player.username}. Click a neutral node to claim your starting territory.`;
+            authSummaryEl.textContent = tr("claimTerritory", { name: state.player.username });
           }
         } else {
-          authSummaryEl.textContent = "Register or log in first. Then click a neutral node on the map to claim your starting territory.";
+          authSummaryEl.textContent = t("loginFirstNode");
         }
         updateAuthButtonsVisibility();
         if (FEATURE_BUILDINGS) {
@@ -4418,11 +4441,11 @@
     });
     locateNodesButton.addEventListener("click", () => {
       if (!lastOwnedFeatures.length) {
-        showToast("Log in first, then generate or load your green nodes before locating them.", "info");
+        showToast(t("loginToLocate"), "info");
         return;
       }
       focusOwnedNodes(lastOwnedFeatures, true);
-      showToast("Centered on your green nodes.", "success");
+      showToast(t("centeredNodes"), "success");
     });
     logoutButton.addEventListener("click", async () => {
       const tokenForLogout = sessionToken;
