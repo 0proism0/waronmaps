@@ -304,7 +304,7 @@
   </div>
   <div id="leaderboardPanel" class="leaderboard-panel">
     <div class="leaderboard-panel-header">
-      <span>🏆 Leaderboard</span>
+      <span id="leaderboardTitle">🏆 Leaderboard</span>
       <div class="leaderboard-header-actions">
         <button id="refreshLeaderboardButton" type="button" class="secondary">Refresh</button>
         <button id="toggleLeaderboardButton" type="button" class="secondary" title="Collapse leaderboard">▾</button>
@@ -316,7 +316,7 @@
         <button id="leaderboardTabNodes" type="button" class="leaderboard-tab" title="Most nodes owned">🗺️ Nodes</button>
       </div>
       <div id="leaderboardList" class="leaderboard-list">
-        <div class="leaderboard-empty">Loading leaderboard...</div>
+        <div class="leaderboard-empty" id="leaderboardLoading">Loading leaderboard...</div>
       </div>
     </div>
   </div>
@@ -562,6 +562,12 @@
         updateRouteRate: "Update Route Rate", armyLines: "Army Lines On This Node", armyPerTick: "Army per tick",
         panelSubtitle: "White nodes start with 10 army. Hold Space and drag from one of your green nodes to an adjacent node to link them.",
         username: "username", password: "password", refresh: "Refresh", language: "Language", sound: "Sound on/off",
+        perTick: "/tick", perSecond: "/s", regularLink: "Regular link", irregularLink: "Irregular link", relativeLink: "relative",
+        outgoingTo: "Outgoing to", incomingFrom: "Incoming from", attack: "attack", transfer: "transfer", set: "set", auto: "auto",
+        armyNodes: "army · {n} nodes", noPlayers: "No players yet.", leaderboardUnavailable: "Leaderboard unavailable.", loadingLeaderboard: "Loading leaderboard...",
+        fixedAmountLabel: "📌 same amount every link", relativeAmountLabel: "📈 starts at (receive + 1)",
+        fixedHint: "Fixed 📌 sends this exact army amount on every link, every tick.",
+        relativeHint: "Relative 📈: a new link starts at (army your node receives per tick) + 1, and you can adjust the value afterwards.",
       },
       zh: {
         menu: "菜单", locate: "定位我的节点", howToPlay: "玩法说明", chat: "聊天", connections: "连接", connectMode: "连接模式",
@@ -577,6 +583,12 @@
         updateRouteRate: "更新路线速率", armyLines: "此节点的兵力线", armyPerTick: "每秒兵力",
         panelSubtitle: "白色节点初始有10兵力。按住空格并从你的绿色节点拖动到相邻节点进行连接。",
         username: "用户名", password: "密码", refresh: "刷新", language: "语言", sound: "声音开关",
+        perTick: "/次", perSecond: "/秒", regularLink: "普通连接", irregularLink: "非常规连接", relativeLink: "相对",
+        outgoingTo: "发送到", incomingFrom: "接收自", attack: "攻击", transfer: "转移", set: "设定", auto: "自动",
+        armyNodes: "兵力 · {n} 节点", noPlayers: "还没有玩家。", leaderboardUnavailable: "排行榜不可用。", loadingLeaderboard: "正在加载排行榜...",
+        fixedAmountLabel: "📌 每个连接相同数量", relativeAmountLabel: "📈 起始为（接收 + 1）",
+        fixedHint: "固定 📌 每个连接每次发送此确切兵力。",
+        relativeHint: "相对 📈：新连接起始为（你的节点每次接收的兵力）+ 1，之后你可以调整数值。",
       },
       es: {
         menu: "Menú", locate: "Localizar mis nodos", howToPlay: "Cómo jugar", chat: "Chat", connections: "Conexiones", connectMode: "Modo conexión",
@@ -592,6 +604,9 @@
         updateRouteRate: "Actualizar tasa de ruta", armyLines: "Líneas de ejército en este nodo", armyPerTick: "Ejército por tick",
         panelSubtitle: "Los nodos blancos empiezan con 10 de ejército. Mantén Espacio y arrastra desde tus nodos verdes a un nodo adyacente para enlazarlos.",
         username: "usuario", password: "contraseña", refresh: "Actualizar", language: "Idioma", sound: "Sonido",
+        perTick: "/tick", perSecond: "/s", regularLink: "Enlace normal", irregularLink: "Enlace irregular", relativeLink: "relativo",
+        outgoingTo: "Saliente a", incomingFrom: "Entrante de", attack: "ataque", transfer: "transferencia", set: "fijar", auto: "auto",
+        armyNodes: "ejército · {n} nodos", noPlayers: "Aún no hay jugadores.", leaderboardUnavailable: "Clasificación no disponible.", loadingLeaderboard: "Cargando clasificación...",
       },
       fr: {
         menu: "Menu", locate: "Localiser mes nœuds", howToPlay: "Comment jouer", chat: "Chat", connections: "Connexions", connectMode: "Mode connexion",
@@ -607,6 +622,9 @@
         updateRouteRate: "Mettre à jour le débit", armyLines: "Lignes d'armée sur ce nœud", armyPerTick: "Armée par tick",
         panelSubtitle: "Les nœuds blancs commencent avec 10 d'armée. Maintenez Espace et glissez de vos nœuds verts vers un nœud adjacent pour les relier.",
         username: "nom d'utilisateur", password: "mot de passe", refresh: "Actualiser", language: "Langue", sound: "Son",
+        perTick: "/tick", perSecond: "/s", regularLink: "Lien normal", irregularLink: "Lien irrégulier", relativeLink: "relatif",
+        outgoingTo: "Sortant vers", incomingFrom: "Entrant de", attack: "attaque", transfer: "transfert", set: "définir", auto: "auto",
+        armyNodes: "armée · {n} nœuds", noPlayers: "Pas encore de joueurs.", leaderboardUnavailable: "Classement indisponible.", loadingLeaderboard: "Chargement du classement...",
       },
       de: {
         menu: "Menü", locate: "Meine Knoten finden", howToPlay: "Spielanleitung", chat: "Chat", connections: "Verbindungen", connectMode: "Verbindungsmodus",
@@ -622,6 +640,9 @@
         updateRouteRate: "Routenrate aktualisieren", armyLines: "Armee-Linien auf diesem Knoten", armyPerTick: "Armee pro Tick",
         panelSubtitle: "Weiße Knoten starten mit 10 Armee. Halte die Leertaste und ziehe von deinen grünen Knoten zu einem benachbarten Knoten, um sie zu verbinden.",
         username: "Benutzername", password: "Passwort", refresh: "Aktualisieren", language: "Sprache", sound: "Ton",
+        perTick: "/tick", perSecond: "/s", regularLink: "Normale Verbindung", irregularLink: "Unregelmäßige Verbindung", relativeLink: "relativ",
+        outgoingTo: "Ausgehend zu", incomingFrom: "Eingehend von", attack: "Angriff", transfer: "Transfer", set: "setzen", auto: "auto",
+        armyNodes: "Armee · {n} Knoten", noPlayers: "Noch keine Spieler.", leaderboardUnavailable: "Bestenliste nicht verfügbar.", loadingLeaderboard: "Bestenliste wird geladen...",
       },
       pt: {
         menu: "Menu", locate: "Localizar meus nós", howToPlay: "Como jogar", chat: "Chat", connections: "Conexões", connectMode: "Modo conexão",
@@ -637,6 +658,9 @@
         updateRouteRate: "Atualizar taxa de rota", armyLines: "Linhas de exército neste nó", armyPerTick: "Exército por tick",
         panelSubtitle: "Nós brancos começam com 10 de exército. Segure Espaço e arraste dos seus nós verdes para um nó adjacente para conectá-los.",
         username: "usuário", password: "senha", refresh: "Atualizar", language: "Idioma", sound: "Som",
+        perTick: "/tick", perSecond: "/s", regularLink: "Ligação normal", irregularLink: "Ligação irregular", relativeLink: "relativo",
+        outgoingTo: "Saída para", incomingFrom: "Entrada de", attack: "ataque", transfer: "transferência", set: "definir", auto: "auto",
+        armyNodes: "exército · {n} nós", noPlayers: "Ainda não há jogadores.", leaderboardUnavailable: "Classificação indisponível.", loadingLeaderboard: "Carregando classificação...",
       },
       ja: {
         menu: "メニュー", locate: "自分のノードを探す", howToPlay: "遊び方", chat: "チャット", connections: "接続", connectMode: "接続モード",
@@ -652,6 +676,9 @@
         updateRouteRate: "ルートレートを更新", armyLines: "このノードの兵力ライン", armyPerTick: "毎ティック兵力",
         panelSubtitle: "白いノードは兵力10から始まります。スペースキーを押しながら緑のノードから隣のノードへドラッグして接続します。",
         username: "ユーザー名", password: "パスワード", refresh: "更新", language: "言語", sound: "サウンド",
+        perTick: "/ティック", perSecond: "/秒", regularLink: "通常リンク", irregularLink: "特殊リンク", relativeLink: "相対",
+        outgoingTo: "送信先", incomingFrom: "受信元", attack: "攻撃", transfer: "転送", set: "設定", auto: "自動",
+        armyNodes: "兵力 · {n} ノード", noPlayers: "まだプレイヤーがいません。", leaderboardUnavailable: "ランキングを利用できません。", loadingLeaderboard: "ランキングを読み込み中...",
       },
       ko: {
         menu: "메뉴", locate: "내 노드 찾기", howToPlay: "플레이 방법", chat: "채팅", connections: "연결", connectMode: "연결 모드",
@@ -667,6 +694,9 @@
         updateRouteRate: "경로 속도 업데이트", armyLines: "이 노드의 병력 라인", armyPerTick: "틱당 병력",
         panelSubtitle: "흰색 노드는 병력 10으로 시작합니다. 스페이스바를 누른 채 초록 노드에서 인접 노드로 드래그하여 연결하세요.",
         username: "사용자 이름", password: "비밀번호", refresh: "새로고침", language: "언어", sound: "소리",
+        perTick: "/틱", perSecond: "/초", regularLink: "일반 연결", irregularLink: "비정규 연결", relativeLink: "상대",
+        outgoingTo: "병력 복수", incomingFrom: "받는 곳", attack: "공격", transfer: "이동", set: "설정", auto: "자동",
+        armyNodes: "병력 · {n} 노드", noPlayers: "아직 플레이어가 없습니다.", leaderboardUnavailable: "리더보드를 사용할 수 없습니다.", loadingLeaderboard: "리더보드 로딩 중...",
       },
       ru: {
         menu: "Меню", locate: "Найти мои узлы", howToPlay: "Как играть", chat: "Чат", connections: "Связи", connectMode: "Режим связи",
@@ -682,6 +712,9 @@
         updateRouteRate: "Обновить скорость", armyLines: "Линии армии на этом узле", armyPerTick: "Армия за тик",
         panelSubtitle: "Белые узлы начинают с 10 армии. Удерживайте пробел и перетащите от ваших зелёных узлов к соседнему, чтобы соединить их.",
         username: "имя пользователя", password: "пароль", refresh: "Обновить", language: "Язык", sound: "Звук",
+        perTick: "/тик", perSecond: "/с", regularLink: "Обычная связь", irregularLink: "Нерегулярная связь", relativeLink: "относит.",
+        outgoingTo: "Исходящая к", incomingFrom: "Входящая от", attack: "атака", transfer: "передача", set: "задать", auto: "авто",
+        armyNodes: "армия · {n} узлов", noPlayers: "Пока нет игроков.", leaderboardUnavailable: "Рейтинг недоступен.", loadingLeaderboard: "Загрузка рейтинга...",
       },
       ar: {
         menu: "القائمة", locate: "حدد مواقع عقدي", howToPlay: "كيفية اللعب", chat: "الدردشة", connections: "الاتصالات", connectMode: "وضع الاتصال",
@@ -697,6 +730,9 @@
         updateRouteRate: "تحديث معدل المسار", armyLines: "خطوط الجيش على هذه العقدة", armyPerTick: "الجيش لكل دورة",
         panelSubtitle: "تبدأ العقد البيضاء بـ 10 جيوش. اضغط مطولاً على المسافة واسحب من عقدك الخضراء إلى عقدة مجاورة لربطها.",
         username: "اسم المستخدم", password: "كلمة المرور", refresh: "تحديث", language: "اللغة", sound: "الصوت",
+        perTick: "/دورة", perSecond: "/ث", regularLink: "رابط عادي", irregularLink: "رابط غير عادي", relativeLink: "نسبي",
+        outgoingTo: "صادر إلى", incomingFrom: "وارد من", attack: "هجوم", transfer: "نقل", set: "تعيين", auto: "تلقائي",
+        armyNodes: "جيش · {n} عقد", noPlayers: "لا يوجد لاعبون بعد.", leaderboardUnavailable: "المتصدرون غير متاحون.", loadingLeaderboard: "جاري تحميل المتصدرين...",
       },
     };
     // Detect the player's language from their browser/locale. If it's not one
@@ -760,6 +796,16 @@
       document.getElementById("usernameInput").placeholder = t("username");
       document.getElementById("passwordInput").placeholder = t("password");
       document.getElementById("refreshLeaderboardButton").textContent = t("refresh");
+      document.getElementById("leaderboardTitle").textContent = `🏆 ${t("leaderboard")}`;
+      const lbLoading = document.getElementById("leaderboardLoading");
+      if (lbLoading) lbLoading.textContent = t("loadingLeaderboard");
+      // Re-render dynamic lists so their strings update with the new language.
+      if (typeof renderLeaderboard === "function" && Array.isArray(leaderboardEntries)) {
+        renderLeaderboard(leaderboardEntries);
+      }
+      if (typeof inspectedNodeId !== "undefined" && inspectedNodeId) {
+        renderNodeRouteList(renderedNodeFeatures.find((f) => String(f.properties?.id || "") === inspectedNodeId) || null);
+      }
       // Node info stat labels
       const infoLabels = document.querySelectorAll("#nodeInfo .stats .stat span");
       const infoKeys = ["nodeInfo", "owner", "army", "armyPerTick", "netPerTick", "position"];
@@ -920,12 +966,8 @@
       sendModeFixedButton.classList.toggle("active", sendMode === "fixed");
       sendModeRelativeButton.classList.toggle("active", sendMode === "relative");
       sendPerTickInput.disabled = false;
-      sendAmountLabel.textContent = sendMode === "fixed"
-        ? "📌 same amount every link"
-        : "📈 starts at (receive + 1)";
-      sendModeHint.textContent = sendMode === "fixed"
-        ? "Fixed 📌 sends this exact army amount on every link, every tick."
-        : "Relative 📈: a new link starts at (army your node receives per tick) + 1, and you can adjust the value afterwards.";
+      sendAmountLabel.textContent = sendMode === "fixed" ? t("fixedAmountLabel") : t("relativeAmountLabel");
+      sendModeHint.textContent = sendMode === "fixed" ? t("fixedHint") : t("relativeHint");
       setSendPerTickValue(sendPerTickInput.value);
     }
     function setSendPerTickValue(value) {
@@ -966,7 +1008,7 @@
       return Number.isInteger(perSecond) ? perSecond.toLocaleString() : perSecond.toFixed(1);
     }
     function formatTickRate(valuePerTick) {
-      return `${valuePerTick.toLocaleString()}/tick (${formatRatePerSecond(valuePerTick)}/s)`;
+      return `${valuePerTick.toLocaleString()}${t("perTick")} (${formatRatePerSecond(valuePerTick)}${t("perSecond")})`;
     }
     function gameTicksPerSecond() {
       return WORLD_TICK_SECONDS > 0 ? (1 / WORLD_TICK_SECONDS) : 0;
@@ -1155,7 +1197,7 @@
       return `${value >= 0 ? "+" : ""}${value.toLocaleString()}`;
     }
     function formatSignedTickRate(value) {
-      return `${formatSignedTick(value)}/tick (${value >= 0 ? "+" : ""}${formatRatePerSecond(value)}/s)`;
+      return `${formatSignedTick(value)}${t("perTick")} (${value >= 0 ? "+" : ""}${formatRatePerSecond(value)}${t("perSecond")})`;
     }
     function sortedAttackFeaturesForSimulation() {
       return [...currentAttackFeatures].sort((left, right) => {
@@ -1253,9 +1295,9 @@
       const toName = nodeDisplayNameById(toId);
       const fromName = nodeDisplayNameById(fromId);
       if (fromId === nodeId) {
-        return `Outgoing to ${toName}`;
+        return `${t("outgoingTo")} ${toName}`;
       }
-      return `Incoming from ${fromName}`;
+      return `${t("incomingFrom")} ${fromName}`;
     }
     function setAttackFeatures(features) {
       const serverFeatures = collapseOverlappingAttackFeatures(features || []);
@@ -1552,13 +1594,14 @@
         const effectiveSendPerTick = effectiveFlowByAttackKey.get(attackFeatureKey(routeFeature)) ?? ratePerTick;
         const overlapCount = Number(routeFeature?.properties?.overlapCount || 1);
         const overlapLabel = overlapCount > 1 ? ` · x${overlapCount}` : "";
-        const modeLabel = String(routeFeature?.properties?.mode || "attack");
+        const modeLabel = t(routeFeature?.properties?.mode === "transfer" ? "transfer" : "attack");
+        const tickLabel = t("perTick");
         if (routeSendMode === "long") {
-          modeEl.textContent = `${modeLabel} · Irregular link · ${ratePerTick.toFixed(2)}/tick (fixed)${overlapLabel}`;
+          modeEl.textContent = `${modeLabel} · ${t("irregularLink")} · ${ratePerTick.toFixed(2)}${tickLabel} (${t("fixed")})${overlapLabel}`;
         } else if (routeSendMode === "relative") {
-          modeEl.textContent = `${modeLabel} · Regular link (relative) · ${effectiveSendPerTick.toLocaleString()}/tick${overlapLabel}`;
+          modeEl.textContent = `${modeLabel} · ${t("regularLink")} (${t("relativeLink")}) · ${effectiveSendPerTick.toLocaleString()}${tickLabel}${overlapLabel}`;
         } else {
-          modeEl.textContent = `${modeLabel} · Regular link · ${effectiveSendPerTick.toLocaleString()}/tick${effectiveSendPerTick !== ratePerTick ? ` (set ${ratePerTick.toLocaleString()})` : ""}${overlapLabel}`;
+          modeEl.textContent = `${modeLabel} · ${t("regularLink")} · ${effectiveSendPerTick.toLocaleString()}${tickLabel}${effectiveSendPerTick !== ratePerTick ? ` (${t("set")} ${ratePerTick.toLocaleString()})` : ""}${overlapLabel}`;
         }
         topEl.append(titleEl, modeEl);
         routeEl.append(topEl);
@@ -1912,14 +1955,14 @@
         renderLeaderboard(leaderboardEntries);
       } catch (e) {
         console.warn("Leaderboard fetch failed:", e);
-        leaderboardListEl.innerHTML = '<div class="leaderboard-empty">Leaderboard unavailable.</div>';
+        leaderboardListEl.innerHTML = `<div class="leaderboard-empty">${t("leaderboardUnavailable")}</div>`;
       }
     }
     function renderLeaderboard(entries) {
       if (!Array.isArray(entries) || entries.length === 0) {
         const emptyEl = document.createElement("div");
         emptyEl.className = "leaderboard-empty";
-        emptyEl.textContent = "No players yet.";
+        emptyEl.textContent = t("noPlayers");
         leaderboardListEl.replaceChildren(emptyEl);
         return;
       }
@@ -1972,7 +2015,7 @@
         scoreEl.className = "leaderboard-score";
         const armyEl = document.createElement("strong");
         armyEl.textContent = army.toLocaleString();
-        scoreEl.append(armyEl, ` army · ${nodes.toLocaleString()} nodes`);
+        scoreEl.append(armyEl, ` ${t("armyNodes").replace("{n}", nodes.toLocaleString())}`);
 
         rowEl.append(rankEl, nameEl, scoreEl);
         return rowEl;
@@ -2430,9 +2473,9 @@
         const routeSendMode = String(activeRoute.properties?.sendMode || "fixed");
         const rate = routeRatePerTick(activeRoute.properties || {});
         if (routeSendMode === "long") {
-          nodeInfoRateEl.textContent = `${rate.toFixed(2)}/tick (irregular, fixed)`;
+          nodeInfoRateEl.textContent = `${rate.toFixed(2)}${t("perTick")} (${t("irregularLink")}, ${t("fixed")})`;
         } else {
-          nodeInfoRateEl.textContent = `${rate.toLocaleString()}/tick`;
+          nodeInfoRateEl.textContent = `${rate.toLocaleString()}${t("perTick")}`;
         }
       } else {
         nodeInfoRateEl.textContent = "-";
