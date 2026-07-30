@@ -182,7 +182,7 @@
 </head>
 <body>
   <div id="loadingScreen" class="loading-screen">
-    <h1>Loading WARONMAPS</h1>
+    <h1 id="loadingScreenTitle">Loading WARONMAPS</h1>
     <p id="loadingScreenStatus">Connecting to game server...</p>
     <div class="progress-track"><div id="loadingScreenProgress" class="progress-fill indeterminate"></div></div>
   </div>
@@ -568,6 +568,20 @@
         fixedAmountLabel: "📌 same amount every link", relativeAmountLabel: "📈 starts at (receive + 1)",
         fixedHint: "Fixed 📌 sends this exact army amount on every link, every tick.",
         relativeHint: "Relative 📈: a new link starts at (army your node receives per tick) + 1, and you can adjust the value afterwards.",
+        unchangeable: "unchangeable", none: "None",
+        connectModeOn: "Connect mode ON: drag from one of your nodes to a neighbor to link.", connectModeOff: "Connect mode OFF.",
+        loginFirst: "Log in first.", loginFirstNode: "Log in first, then click one of your nodes.",
+        routeSet: "Route {from} -> {to} set to {rate}.", routeRemoved: "Removed route {from} -> {to}.", routeUpdateFailed: "Route rate update failed: {err}", routeRemoveFailed: "Route remove failed: {err}",
+        connectFailed: "Connect failed: {err}", removed: "Removed {from} -> {to}.", selectedNodeStatus: "Selected node {id}. Hold Space and drag to an adjacent node to link.",
+        linkingFrom: "Linking from node {id}. Drag to an adjacent node.", linkCancelled: "Link from node {id} cancelled.",
+        clearedNode: "Cleared node {id}.", nodeNoLongerYours: "Selected node is no longer yours.",
+        transferStarted: "Transfer started at {rate}.", attackStarted: "Attack started at {rate}.",
+        claimFailed: "Claim failed: {err}", startingClaimed: "Starting territory claimed! {n} nodes.",
+        loginToClaim: "Log in first, then select a neutral node to claim.",
+        flyingTo: "Flying to {name}'s territory.", noNodesOnMap: "{name} has no nodes on the map.",
+        loadingGame: "Loading Fight and Conquer", connectingServer: "Connecting to game server...", preparingNodes: "Preparing nodes...",
+        loadedNodes: "Loaded {n} nodes. Starting map...", waitingAttempt: "Waiting for server... ({n})", failedStart: "Failed to start: {err}",
+        noActiveRoute: "No active route is selected. Create the connection first, then update its send rate here.",
       },
       zh: {
         menu: "菜单", locate: "定位我的节点", howToPlay: "玩法说明", chat: "聊天", connections: "连接", connectMode: "连接模式",
@@ -589,6 +603,20 @@
         fixedAmountLabel: "📌 每个连接相同数量", relativeAmountLabel: "📈 起始为（接收 + 1）",
         fixedHint: "固定 📌 每个连接每次发送此确切兵力。",
         relativeHint: "相对 📈：新连接起始为（你的节点每次接收的兵力）+ 1，之后你可以调整数值。",
+        unchangeable: "不可更改", none: "无",
+        connectModeOn: "连接模式已开启：从你的节点拖动到相邻节点进行连接。", connectModeOff: "连接模式已关闭。",
+        loginFirst: "请先登录。", loginFirstNode: "请先登录，然后点击你的一个节点。",
+        routeSet: "路线 {from} -> {to} 已设为 {rate}。", routeRemoved: "已移除路线 {from} -> {to}。", routeUpdateFailed: "路线速率更新失败：{err}", routeRemoveFailed: "路线移除失败：{err}",
+        connectFailed: "连接失败：{err}", removed: "已移除 {from} -> {to}。", selectedNodeStatus: "已选节点 {id}。按住空格并拖动到相邻节点进行连接。",
+        linkingFrom: "正在从节点 {id} 连接。拖动到相邻节点。", linkCancelled: "从节点 {id} 的连接已取消。",
+        clearedNode: "已清除节点 {id}。", nodeNoLongerYours: "所选节点不再属于你。",
+        transferStarted: "转移已开始，速率为 {rate}。", attackStarted: "攻击已开始，速率为 {rate}。",
+        claimFailed: "占领失败：{err}", startingClaimed: "起始领地已占领！{n} 个节点。",
+        loginToClaim: "请先登录，然后选择一个中立节点进行占领。",
+        flyingTo: "正在飞往 {name} 的领地。", noNodesOnMap: "{name} 在地图上没有节点。",
+        loadingGame: "正在加载《征服之路》", connectingServer: "正在连接游戏服务器...", preparingNodes: "正在准备节点...",
+        loadedNodes: "已加载 {n} 个节点。正在启动地图...", waitingAttempt: "等待服务器...（{n}）", failedStart: "启动失败：{err}",
+        noActiveRoute: "未选择活动路线。请先创建连接，然后在此更新其发送速率。",
       },
       es: {
         menu: "Menú", locate: "Localizar mis nodos", howToPlay: "Cómo jugar", chat: "Chat", connections: "Conexiones", connectMode: "Modo conexión",
@@ -753,6 +781,14 @@
     function t(key) {
       return TRANSLATIONS[currentLang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
     }
+    // Parameterized translation: tr("routeSet", { from: "A", to: "B", rate: "5" })
+    function tr(key, params = {}) {
+      let str = t(key);
+      for (const [k, v] of Object.entries(params)) {
+        str = str.replace(`{${k}}`, v);
+      }
+      return str;
+    }
     function applyLanguage() {
       document.getElementById("locateNodesButton").textContent = t("locate");
       document.getElementById("showTutorialButton").textContent = `❓ ${t("howToPlay")}`;
@@ -799,13 +835,12 @@
       document.getElementById("leaderboardTitle").textContent = `🏆 ${t("leaderboard")}`;
       const lbLoading = document.getElementById("leaderboardLoading");
       if (lbLoading) lbLoading.textContent = t("loadingLeaderboard");
-      // Re-render dynamic lists so their strings update with the new language.
-      if (typeof renderLeaderboard === "function" && Array.isArray(leaderboardEntries)) {
-        renderLeaderboard(leaderboardEntries);
-      }
-      if (typeof inspectedNodeId !== "undefined" && inspectedNodeId) {
-        renderNodeRouteList(renderedNodeFeatures.find((f) => String(f.properties?.id || "") === inspectedNodeId) || null);
-      }
+      // Loading screen
+      const lsTitle = document.getElementById("loadingScreenTitle");
+      if (lsTitle) lsTitle.textContent = t("loadingGame");
+      const lsStatus = document.getElementById("loadingScreenStatus");
+      if (lsStatus && lsStatus.textContent.includes("Connecting")) lsStatus.textContent = t("connectingServer");
+
       // Node info stat labels
       const infoLabels = document.querySelectorAll("#nodeInfo .stats .stat span");
       const infoKeys = ["nodeInfo", "owner", "army", "armyPerTick", "netPerTick", "position"];
@@ -823,6 +858,13 @@
           localStorage.setItem(LANG_KEY, currentLang);
           applyLanguage();
           renderLanguageList();
+          // Re-render dynamic lists so their strings update to the new language.
+          if (Array.isArray(leaderboardEntries)) {
+            renderLeaderboard(leaderboardEntries);
+          }
+          if (inspectedNodeId) {
+            renderNodeRouteList(renderedNodeFeatures.find((f) => String(f.properties?.id || "") === inspectedNodeId) || null);
+          }
         });
         langList.appendChild(btn);
       }
@@ -834,6 +876,9 @@
         renderLanguageList();
       }
     });
+    // Apply the detected/saved language immediately so the loading screen and
+    // initial UI are translated before the map finishes initializing.
+    applyLanguage();
     const chatPanel = document.getElementById("chatPanel");
     const closeChatButton = document.getElementById("closeChatButton");
     const chatBadge = document.getElementById("chatBadge");
@@ -1396,7 +1441,7 @@
     }
     async function updateAttackRate(fromNodeId, toNodeId, sendPerTick) {
       if (!sessionToken) {
-        showToast("Log in first.", "error");
+        showToast(t("loginFirst"), "error");
         return;
       }
       try {
@@ -1429,16 +1474,16 @@
         ));
         setAttackFeatures(nextFeatures);
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || null);
-        const rateLabel = `${normalizeSendPerTick(sendPerTick).toLocaleString()}/tick`;
-        showToast(`Route ${fromNodeId} -> ${toNodeId} set to ${rateLabel}.`, "success");
+        const rateLabel = `${normalizeSendPerTick(sendPerTick).toLocaleString()}${t("perTick")}`;
+        showToast(tr("routeSet", { from: fromNodeId, to: toNodeId, rate: rateLabel }), "success");
         void refreshGameState();
       } catch (error) {
-        showToast(`Route rate update failed: ${error.message}`, "error");
+        showToast(tr("routeUpdateFailed", { err: error.message }), "error");
       }
     }
     async function removeAttackConnection(fromNodeId, toNodeId) {
       if (!sessionToken) {
-        showToast("Log in first.", "error");
+        showToast(t("loginFirst"), "error");
         return;
       }
       try {
@@ -1457,15 +1502,15 @@
         )));
         renderSelectedNodeTargets();
         updateNodeInfo(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || null);
-        showToast(`Removed route ${fromNodeId} -> ${toNodeId}.`, "info");
+        showToast(tr("routeRemoved", { from: fromNodeId, to: toNodeId }), "info");
         void refreshGameState();
       } catch (error) {
-        showToast(`Route remove failed: ${error.message}`, "error");
+        showToast(tr("routeRemoveFailed", { err: error.message }), "error");
       }
     }
     async function toggleConnectionToTargetNode(targetNodeId, clickedFeature = null) {
       if (!sessionToken || !selectedNodeId || !selectedNodeFeature) {
-        showToast("Log in first, then click one of your nodes.", "error");
+        showToast(t("loginFirstNode"), "error");
         return;
       }
       const activeRoute = findAttackFeature(selectedNodeId, targetNodeId);
@@ -1510,7 +1555,7 @@
             String(attackFeature?.properties?.fromNodeId || "") === selectedNodeId
             && String(attackFeature?.properties?.toNodeId || "") === String(targetNodeId)
           )));
-          showToast(`Removed ${selectedNodeId} -> ${targetNodeId}.`, "info");
+          showToast(tr("removed", { from: selectedNodeId, to: targetNodeId }), "info");
         } else if (response.attack) {
           const nextFeatures = currentAttackFeatures.filter((attackFeature) => !(
             (String(attackFeature?.properties?.fromNodeId || "") === selectedNodeId
@@ -1522,8 +1567,8 @@
           const computedRate = Number(response.attack?.properties?.sendPerTick || sendPerTick);
           playSound("link");
           showToast(String(targetFeature?.properties?.ownerState || "") === "self"
-            ? `Transfer started at ${formatTickRate(computedRate)}.`
-            : `Attack started at ${formatTickRate(computedRate)}.`, "success");
+            ? tr("transferStarted", { rate: formatTickRate(computedRate) })
+            : tr("attackStarted", { rate: formatTickRate(computedRate) }), "success");
         }
         updateSelectionStatus();
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature?.properties?.id || "") === inspectedNodeId) || selectedNodeFeature);
@@ -1539,10 +1584,10 @@
           String(targetFeature?.properties?.ownerState || "") === "self"
           && !findAttackFeature(selectedNodeId, targetNodeId)
         ) {
-          selectSenderNode(targetFeature, `Selected node ${targetNodeId}.`);
+          selectSenderNode(targetFeature, tr("selectedNodeStatus", { id: targetNodeId }));
           return;
         }
-        showToast(`Connect failed: ${error.message}`, "error");
+        showToast(tr("connectFailed", { err: error.message }), "error");
       }
     }
     function renderNodeRouteList(feature = null) {
@@ -1597,7 +1642,7 @@
         const modeLabel = t(routeFeature?.properties?.mode === "transfer" ? "transfer" : "attack");
         const tickLabel = t("perTick");
         if (routeSendMode === "long") {
-          modeEl.textContent = `${modeLabel} · ${t("irregularLink")} · ${ratePerTick.toFixed(2)}${tickLabel} (${t("fixed")})${overlapLabel}`;
+          modeEl.textContent = `${modeLabel} · ${t("irregularLink")} · ${ratePerTick.toFixed(2)}${tickLabel} (${t("unchangeable")})${overlapLabel}`;
         } else if (routeSendMode === "relative") {
           modeEl.textContent = `${modeLabel} · ${t("regularLink")} (${t("relativeLink")}) · ${effectiveSendPerTick.toLocaleString()}${tickLabel}${overlapLabel}`;
         } else {
@@ -1916,11 +1961,11 @@
       bottomConnectModeButton.classList.toggle("active", connectModeEnabled);
       updateLinkDragPanState();
       if (connectModeEnabled) {
-        showToast("Connect mode ON: drag from one of your nodes to a neighbor to link.", "info");
-        setStatus("Connect mode ON: drag from one of your nodes to a neighbor to link.");
+        showToast(t("connectModeOn"), "info");
+        setStatus(t("connectModeOn"));
       } else {
         cancelLinkDrag();
-        showToast("Connect mode OFF.", "info");
+        showToast(t("connectModeOff"), "info");
         setStatus(defaultStatusMessage());
       }
     });
@@ -1996,9 +2041,9 @@
           }
           if (center && center.length >= 2) {
             map.flyTo({ center: [center[0], center[1]], zoom: 12, essential: true });
-            showToast(`Flying to ${username}'s territory.`, "info");
+            showToast(tr("flyingTo", { name: username }), "info");
           } else {
-            showToast(`${username} has no nodes on the map.`, "info");
+            showToast(tr("noNodesOnMap", { name: username }), "info");
           }
         });
 
@@ -2473,7 +2518,7 @@
         const routeSendMode = String(activeRoute.properties?.sendMode || "fixed");
         const rate = routeRatePerTick(activeRoute.properties || {});
         if (routeSendMode === "long") {
-          nodeInfoRateEl.textContent = `${rate.toFixed(2)}${t("perTick")} (${t("irregularLink")}, ${t("fixed")})`;
+          nodeInfoRateEl.textContent = `${rate.toFixed(2)}${t("perTick")} (${t("unchangeable")})`;
         } else {
           nodeInfoRateEl.textContent = `${rate.toLocaleString()}${t("perTick")}`;
         }
@@ -2776,7 +2821,7 @@
 
     async function claimStartNode(nodeId) {
       if (!sessionToken || !nodeId) {
-        showToast("Log in first, then select a neutral node to claim.", "error");
+        showToast(t("loginToClaim"), "error");
         return;
       }
       try {
@@ -2793,11 +2838,11 @@
         if (lastOwnedFeatures.length) {
           focusOwnedNodes(lastOwnedFeatures, true);
         }
-        showToast(`Starting territory claimed! ${result.count || 0} nodes.`, "success");
+        showToast(tr("startingClaimed", { n: result.count || 0 }), "success");
         saveGameExternally();
         showTutorial();
       } catch (error) {
-        showToast(`Claim failed: ${error.message}`, "error");
+        showToast(tr("claimFailed", { err: error.message }), "error");
       }
     }
 
@@ -2808,7 +2853,7 @@
       }
       const route = findAttackFeature(selectedNodeId, inspectedNodeId);
       if (!route) {
-        showToast("No active route is selected. Create the connection first, then update its send rate here.", "info");
+        showToast(t("noActiveRoute"), "info");
         updateRouteControls(renderedNodeFeatures.find((feature) => String(feature.properties?.id || "") === inspectedNodeId) || null);
         return;
       }
@@ -2853,7 +2898,7 @@
       selectedNodeTextEl.textContent = selectedNodeSummary(feature);
       clearConnectableTargets();
       void refreshSelectedNodeTargets();
-      setStatus(statusMessage || `Selected node ${nodeId}. Hold Space and drag to an adjacent node to link.`);
+      setStatus(statusMessage || tr("selectedNodeStatus", { id: nodeId }));
     }
 
     function defaultStatusMessage() {
@@ -2868,7 +2913,7 @@
         setStatus(defaultStatusMessage());
         return;
       }
-      setStatus(`Selected node ${selectedNodeId}. Hold Space and drag to an adjacent node to link.`);
+      setStatus(tr("selectedNodeStatus", { id: selectedNodeId }));
     }
 
     function mouseEventToMapPoint(event) {
@@ -2963,7 +3008,7 @@
       updateLinkDragPanState();
       map.getCanvas().style.cursor = "crosshair";
       void refreshSelectedNodeTargets();
-      setStatus(`Linking from node ${nodeId}. Drag to an adjacent node.`);
+      setStatus(tr("linkingFrom", { id: nodeId }));
       return true;
     }
 
@@ -2996,7 +3041,7 @@
         linkDragSnapPoint = { x: 0, y: 0 };
         map.getCanvas().style.cursor = "crosshair";
         updateHoveredNodeHighlight(null);
-        setStatus(`Linking from node ${linkDragState.fromNodeId}. Drag to an adjacent node.`);
+        setStatus(tr("linkingFrom", { id: linkDragState.fromNodeId }));
       }
     }
 
@@ -3014,12 +3059,12 @@
       updateHoveredNodeHighlight(null);
       map.getCanvas().style.cursor = "";
       if (!targetFeature) {
-        setStatus(`Link from node ${fromNodeId} cancelled.`);
+        setStatus(tr("linkCancelled", { id: fromNodeId }));
         return;
       }
       const targetNodeId = String(targetFeature.properties?.id || "");
       if (!targetNodeId || targetNodeId === fromNodeId) {
-        setStatus(`Link from node ${fromNodeId} cancelled.`);
+        setStatus(tr("linkCancelled", { id: fromNodeId }));
         return;
       }
       inspectNode(targetFeature);
@@ -3038,7 +3083,7 @@
       updateLinkDragPanState();
       updateHoveredNodeHighlight(null);
       map.getCanvas().style.cursor = "";
-      setStatus(`Link from node ${fromNodeId} cancelled.`);
+      setStatus(tr("linkCancelled", { id: fromNodeId }));
     }
 
     function handleNodeLeave() {
@@ -3542,7 +3587,7 @@
         return;
       }
       if (selectedNodeId === nodeId) {
-        clearSelection(`Cleared node ${nodeId}.`);
+        clearSelection(tr("clearedNode", { id: nodeId }));
         inspectNode(feature);
         return;
       }
@@ -3585,7 +3630,7 @@
         selectedNodeFeature = refreshedSelection;
         selectedNodeTextEl.textContent = selectedNodeSummary(refreshedSelection);
       } else if (selectedNodeFeature && refreshedSelection && refreshedSelection.properties?.ownerState !== "self") {
-        clearSelection("Selected node is no longer yours.");
+        clearSelection(t("nodeNoLongerYours"));
       }
     }
 
@@ -4628,16 +4673,16 @@
           const status = await fetchJson(BUILD_STATUS_URL, { cache: "no-store" });
           if (status.phase === "complete") {
             const nodeCount = status.node_count || status.total || 0;
-            loadingScreenStatusEl.textContent = `Loaded ${nodeCount.toLocaleString()} nodes. Starting map...`;
+            loadingScreenStatusEl.textContent = tr("loadedNodes", { n: nodeCount.toLocaleString() });
             loadingScreenProgressEl.classList.remove("indeterminate");
             loadingScreenProgressEl.style.width = "100%";
             await new Promise((resolve) => window.setTimeout(resolve, 200));
             loadingScreenEl.classList.add("hidden");
             return;
           }
-          loadingScreenStatusEl.textContent = `Preparing nodes... ${status.progress_nodes_current || 0} / ${status.progress_nodes_total || "?"}`;
+          loadingScreenStatusEl.textContent = `${t("preparingNodes")} ${status.progress_nodes_current || 0} / ${status.progress_nodes_total || "?"}`;
         } catch (error) {
-          loadingScreenStatusEl.textContent = `Waiting for server... (${attempt + 1})`;
+          loadingScreenStatusEl.textContent = tr("waitingAttempt", { n: attempt + 1 });
         }
         await new Promise((resolve) => window.setTimeout(resolve, delayMs));
       }
@@ -4650,7 +4695,7 @@
         initializeMap();
       })
       .catch((error) => {
-        loadingScreenStatusEl.textContent = `Failed to start: ${error.message}`;
+        loadingScreenStatusEl.textContent = tr("failedStart", { err: error.message });
         loadingScreenProgressEl.classList.remove("indeterminate");
         loadingScreenProgressEl.style.width = "0%";
       });
