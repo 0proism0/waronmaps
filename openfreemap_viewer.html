@@ -182,7 +182,7 @@
 </head>
 <body>
   <div id="loadingScreen" class="loading-screen">
-    <h1 id="loadingScreenTitle">Loading WARONMAPS</h1>
+    <h1 id="loadingScreenTitle">Loading</h1>
     <p id="loadingScreenStatus">Connecting to game server...</p>
     <div class="progress-track"><div id="loadingScreenProgress" class="progress-fill indeterminate"></div></div>
   </div>
@@ -209,10 +209,10 @@
       <div class="section">
         <div class="section-title">📊 Live Stats</div>
         <div class="stats">
-          <div class="stat"><span>Region</span><strong id="regionText">Maine, New Hampshire</strong></div>
-          <div class="stat"><span>Rendered nodes</span><strong id="renderedNodeCount">0</strong></div>
-          <div class="stat"><span>Active attacks</span><strong id="activeAttackCount">0</strong></div>
-          <div class="stat"><span>Selected node</span><strong id="selectedNodeText">None</strong></div>
+          <div class="stat"><span data-i18n="region">Region</span><strong id="regionText">Maine, New Hampshire</strong></div>
+          <div class="stat"><span data-i18n="renderedNodes">Rendered nodes</span><strong id="renderedNodeCount">0</strong></div>
+          <div class="stat"><span data-i18n="activeAttacks">Active attacks</span><strong id="activeAttackCount">0</strong></div>
+          <div class="stat"><span data-i18n="selectedNode">Selected node</span><strong id="selectedNodeText">None</strong></div>
         </div>
       </div>
       <div class="section">
@@ -270,12 +270,12 @@
     </div>
     <div class="node-info-body">
       <div class="stats">
-      <div class="stat"><span>Node</span><strong id="nodeInfoId">None</strong></div>
-      <div class="stat"><span>Owner</span><strong id="nodeInfoOwner">No node selected</strong></div>
-      <div class="stat"><span>Army</span><strong id="nodeInfoArmy">0</strong></div>
-      <div class="stat army-rate-stat"><span>Army per tick</span><strong id="nodeInfoRate">-</strong></div>
-      <div class="stat"><span>Net per 1s tick</span><strong id="nodeInfoDelta">0</strong></div>
-      <div class="stat"><span>Position</span><strong id="nodeInfoPosition">-</strong></div>
+      <div class="stat"><span data-i18n="nodeInfo">Node</span><strong id="nodeInfoId">None</strong></div>
+      <div class="stat"><span data-i18n="owner">Owner</span><strong id="nodeInfoOwner">No node selected</strong></div>
+      <div class="stat"><span data-i18n="army">Army</span><strong id="nodeInfoArmy">0</strong></div>
+      <div class="stat army-rate-stat"><span data-i18n="armyPerTick">Army per tick</span><strong id="nodeInfoRate">-</strong></div>
+      <div class="stat"><span data-i18n="netPerTick">Net per 1s tick</span><strong id="nodeInfoDelta">0</strong></div>
+      <div class="stat"><span data-i18n="position">Position</span><strong id="nodeInfoPosition">-</strong></div>
     </div>
     <div class="route-controls">
       <div id="routeInfoHint" class="hint">Hold Space and drag from one of your nodes to an adjacent node to link.</div>
@@ -579,7 +579,7 @@
         claimFailed: "Claim failed: {err}", startingClaimed: "Starting territory claimed! {n} nodes.",
         loginToClaim: "Log in first, then select a neutral node to claim.",
         flyingTo: "Flying to {name}'s territory.", noNodesOnMap: "{name} has no nodes on the map.",
-        loadingGame: "Loading Fight and Conquer", connectingServer: "Connecting to game server...", preparingNodes: "Preparing nodes...",
+        loadingGame: "Loading", connectingServer: "Connecting to game server...", preparingNodes: "Preparing nodes...",
         loadedNodes: "Loaded {n} nodes. Starting map...", waitingAttempt: "Waiting for server... ({n})", failedStart: "Failed to start: {err}",
         noActiveRoute: "No active route is selected. Create the connection first, then update its send rate here.",
       },
@@ -614,7 +614,7 @@
         claimFailed: "占领失败：{err}", startingClaimed: "起始领地已占领！{n} 个节点。",
         loginToClaim: "请先登录，然后选择一个中立节点进行占领。",
         flyingTo: "正在飞往 {name} 的领地。", noNodesOnMap: "{name} 在地图上没有节点。",
-        loadingGame: "正在加载《征服之路》", connectingServer: "正在连接游戏服务器...", preparingNodes: "正在准备节点...",
+        loadingGame: "加载中", connectingServer: "正在连接游戏服务器...", preparingNodes: "正在准备节点...",
         loadedNodes: "已加载 {n} 个节点。正在启动地图...", waitingAttempt: "等待服务器...（{n}）", failedStart: "启动失败：{err}",
         noActiveRoute: "未选择活动路线。请先创建连接，然后在此更新其发送速率。",
       },
@@ -820,9 +820,6 @@
       if (subtitle) subtitle.textContent = t("panelSubtitle");
       const liveStatsTitle = document.querySelector(".section-title");
       if (liveStatsTitle) liveStatsTitle.textContent = `📊 ${t("liveStats")}`;
-      const statLabels = document.querySelectorAll(".stats .stat span");
-      const statKeys = ["region", "renderedNodes", "activeAttacks", "selectedNode"];
-      statLabels.forEach((el, i) => { if (statKeys[i]) el.textContent = t(statKeys[i]); });
       document.getElementById("status").textContent = t("waitingForServer");
       document.getElementById("nodeInfoStatus").textContent = t("clickNodeToInspect");
       document.getElementById("routeInfoHint").textContent = t("holdSpaceToLink");
@@ -841,10 +838,10 @@
       const lsStatus = document.getElementById("loadingScreenStatus");
       if (lsStatus && lsStatus.textContent.includes("Connecting")) lsStatus.textContent = t("connectingServer");
 
-      // Node info stat labels
-      const infoLabels = document.querySelectorAll("#nodeInfo .stats .stat span");
-      const infoKeys = ["nodeInfo", "owner", "army", "armyPerTick", "netPerTick", "position"];
-      infoLabels.forEach((el, i) => { if (infoKeys[i]) el.textContent = t(infoKeys[i]); });
+      // Any element with a data-i18n attribute gets its text from the key.
+      document.querySelectorAll("[data-i18n]").forEach((el) => {
+        el.textContent = t(el.getAttribute("data-i18n"));
+      });
     }
     function renderLanguageList() {
       langList.replaceChildren();
