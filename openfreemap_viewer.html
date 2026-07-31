@@ -284,7 +284,6 @@
     </div>
     <div class="node-info-body">
       <div class="stats">
-      <div class="stat"><span data-i18n="nodeInfo">Node</span><strong id="nodeInfoId">None</strong></div>
       <div class="stat"><span data-i18n="owner">Owner</span><strong id="nodeInfoOwner">No node selected</strong></div>
       <div class="stat"><span data-i18n="army">Army</span><strong id="nodeInfoArmy">0</strong></div>
       <div class="stat army-rate-stat"><span data-i18n="armyPerTick">Army per tick</span><strong id="nodeInfoRate">-</strong></div>
@@ -1359,12 +1358,41 @@
       }
       return effectiveFlowByAttackKey;
     }
+    // Road-name term translations: translate common road-type words and
+    // directional words into the selected language, keeping proper names as-is.
+    const ROAD_TERMS = {
+      zh: { "Road": "路", "Street": "街", "Avenue": "大道", "Drive": "道", "Lane": "巷", "Boulevard": "大道", "Highway": "公路", "Route": "公路", "Circle": "环路", "Place": "广场", "Terrace": "台地", "Way": "路", "Court": "庭院", "Path": "小径", "Trail": "小径", "Parkway": "公园大道", "Extension": "延伸段", "Bridge": "桥", "North": "北", "South": "南", "East": "东", "West": "西", "Cross": "十字", "Crossroad": "十字路口", "Unnamed Road": "未命名道路" },
+      ja: { "Road": "道路", "Street": "通り", "Avenue": "大通り", "Drive": "ドライブ", "Lane": "レーン", "Boulevard": "大通り", "Highway": "高速道路", "Route": "ルート", "Circle": "環状線", "Place": "広場", "Way": "道", "Bridge": "橋", "North": "北", "South": "南", "East": "東", "West": "西", "Unnamed Road": "無名道路" },
+      ko: { "Road": "로", "Street": "거리", "Avenue": "대로", "Drive": "드라이브", "Lane": "레인", "Boulevard": "대로", "Highway": "고속도로", "Route": "국도", "Place": "광장", "Way": "길", "Bridge": "다리", "North": "북", "South": "남", "East": "동", "West": "서", "Unnamed Road": "이름 없는 도로" },
+      es: { "Road": "Carretera", "Street": "Calle", "Avenue": "Avenida", "Drive": "Paseo", "Lane": "Callejón", "Boulevard": "Bulevar", "Highway": "Autopista", "Route": "Ruta", "Place": "Plaza", "Way": "Camino", "Bridge": "Puente", "North": "Norte", "South": "Sur", "East": "Este", "West": "Oeste", "Unnamed Road": "Carretera sin nombre" },
+      fr: { "Road": "Route", "Street": "Rue", "Avenue": "Avenue", "Drive": "Allée", "Lane": "Ruelle", "Boulevard": "Boulevard", "Highway": "Autoroute", "Route": "Route", "Place": "Place", "Way": "Chemin", "Bridge": "Pont", "North": "Nord", "South": "Sud", "East": "Est", "West": "Ouest", "Unnamed Road": "Route sans nom" },
+      de: { "Road": "Straße", "Street": "Straße", "Avenue": "Allee", "Drive": "Weg", "Lane": "Gasse", "Boulevard": "Boulevard", "Highway": "Autobahn", "Route": "Route", "Place": "Platz", "Way": "Weg", "Bridge": "Brücke", "North": "Nord", "South": "Süd", "East": "Ost", "West": "West", "Unnamed Road": "Unbenannte Straße" },
+      pt: { "Road": "Estrada", "Street": "Rua", "Avenue": "Avenida", "Drive": "Alameda", "Lane": "Beco", "Boulevard": "Avenida", "Highway": "Rodovia", "Route": "Rota", "Place": "Praça", "Way": "Caminho", "Bridge": "Ponte", "North": "Norte", "South": "Sul", "East": "Leste", "West": "Oeste", "Unnamed Road": "Estrada sem nome" },
+      ru: { "Road": "Дорога", "Street": "Улица", "Avenue": "Проспект", "Drive": "Проезд", "Lane": "Переулок", "Boulevard": "Бульвар", "Highway": "Шоссе", "Route": "Трасса", "Place": "Площадь", "Way": "Дорога", "Bridge": "Мост", "North": "Север", "South": "Юг", "East": "Восток", "West": "Запад", "Unnamed Road": "Безымянная дорога" },
+      ar: { "Road": "طريق", "Street": "شارع", "Avenue": "جادة", "Drive": "ممر", "Lane": "زقاق", "Boulevard": "جادة", "Highway": "طريق سريع", "Route": "طريق", "Place": "ساحة", "Way": "طريق", "Bridge": "جسر", "North": "شمال", "South": "جنوب", "East": "شرق", "West": "غرب", "Unnamed Road": "طريق بدون اسم" },
+    };
+    function translateRoadName(rawName) {
+      const name = String(rawName || "");
+      if (!name) return "";
+      if (currentLang === "en") return name;
+      const terms = ROAD_TERMS[currentLang];
+      if (!terms) return name;
+      if (name === "Unnamed Road") return terms["Unnamed Road"] || name;
+      // Replace whole-word road-type terms (longest first to avoid partial matches).
+      let result = name;
+      const keys = Object.keys(terms).filter((k) => k !== "Unnamed Road").sort((a, b) => b.length - a.length);
+      for (const term of keys) {
+        const re = new RegExp(`\\b${term}\\b`, "g");
+        result = result.replace(re, terms[term]);
+      }
+      return result;
+    }
     function displayNodeName(rawName) {
       const name = String(rawName || "");
       if (name === "Unnamed Road") {
         return t("unnamedRoad");
       }
-      return name || t("intersection");
+      return translateRoadName(name) || t("intersection");
     }
     function nodeDisplayNameById(nodeId) {
       const feature = renderedNodeFeatures.find((item) => String(item?.properties?.id || "") === String(nodeId));
@@ -2511,7 +2539,6 @@
       if (!feature) {
         nodeInfoEl.classList.add("hidden");
         nodeInfoTitleEl.textContent = "";
-        nodeInfoIdEl.textContent = t("none");
         nodeInfoOwnerEl.textContent = t("noNodeSelected");
         nodeInfoArmyEl.textContent = "0";
         nodeInfoRateEl.textContent = "-";
@@ -2537,7 +2564,6 @@
       const perTick = nodeNetPerTick(feature);
       const displayName = displayNodeName(feature.properties?.displayName);
       nodeInfoTitleEl.textContent = displayName;
-      nodeInfoIdEl.textContent = displayName;
       nodeInfoOwnerEl.textContent = nodeOwnerLabel(feature);
       nodeInfoArmyEl.textContent = Number(feature.properties?.army || 0).toLocaleString();
       nodeInfoDeltaEl.textContent = formatSignedTickRate(perTick.net);
